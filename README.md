@@ -26,7 +26,7 @@ before it becomes critical.
 - LED + buzzer on-site indicators
 
 ## Demo Video Link 
--- 
+-- [Click](https://drive.google.com/file/d/1zJQG9QPFGXjYabdxMXgRPIjrd-HZ-JN9/view?usp=drive_link)
 
 ## Team
 - Vivek Patne 
