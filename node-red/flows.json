@@ -1,0 +1,2255 @@
+[
+    {
+        "id": "72c8828406909cd5",
+        "type": "tab",
+        "label": "Flow 3",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "7a5dab4dbbb44345",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Weather Data Processor",
+        "func": "// =====================================================\n// WEATHER DATA PROCESSOR\n// Extract required fields from OpenWeather 3-hour blocks\n// =====================================================\n\nconst list = msg.payload;\n\nif (!Array.isArray(list) || list.length === 0) {\n    node.warn(\"Invalid OpenWeather forecast data\");\n    return null;\n}\n\n// ---------------------------------------------\n// Helper function\n// ---------------------------------------------\n\nfunction getRain(block) {\n    if (block.rain && Number.isFinite(Number(block.rain[\"3h\"]))) {\n        return Number(block.rain[\"3h\"]);\n    }\n\n    return 0;\n}\n\n\n// ---------------------------------------------\n// Extract required weather fields\n// ---------------------------------------------\n\nconst forecast = list.map(block => {\n\n    return {\n        dt: block.dt,\n\n        pop: Number(block.pop || 0),\n\n        rain: getRain(block),\n\n        pressure: Number(\n            block.main?.pressure || 0\n        ),\n\n        humidity: Number(\n            block.main?.humidity || 0\n        ),\n\n        temp: Number(block.main.temp),\n\n        clouds: Number(\n            block.clouds?.all || 0\n        ),\n\n        speed: Number(\n            block.wind?.speed || 0\n        ),\n\n        gust: Number(\n            block.wind?.gust || 0\n        )\n    };\n\n});\n\n\n// ---------------------------------------------\n// Store complete processed forecast\n// ---------------------------------------------\n\nflow.set(\"weatherForecast\", forecast);\n\n\n// ---------------------------------------------\n// Keep the first 8 blocks = next ~24 hours\n// ---------------------------------------------\n\nconst next24h = forecast.slice(0, 8);\n\n\n// First 2 blocks = next ~6 hours\nconst next6h = forecast.slice(0, 2);\n\n\n// ---------------------------------------------\n// Send both forward\n// ---------------------------------------------\n\nmsg.payload = {\n    next6h: next6h,\n    next24h: next24h\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 850,
+        "y": 1660,
+        "wires": [
+            [
+                "6a3e5b7e94c2f435",
+                "c0d76993cb45850d",
+                "22f7eced8cb0a880",
+                "c2e3d1eb630f51f2"
+            ]
+        ]
+    },
+    {
+        "id": "abfa706a9084ed17",
+        "type": "openweathermap",
+        "z": "72c8828406909cd5",
+        "name": "OpenWeather Forecast ",
+        "wtype": "forecast",
+        "lon": "",
+        "lat": "",
+        "city": "Bengaluru",
+        "country": "India",
+        "language": "en",
+        "x": 490,
+        "y": 1660,
+        "wires": [
+            [
+                "7a5dab4dbbb44345",
+                "ebfb56163d99bb7e"
+            ]
+        ]
+    },
+    {
+        "id": "ebfb56163d99bb7e",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Weather Raw Data Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 530,
+        "y": 1580,
+        "wires": []
+    },
+    {
+        "id": "013365d5a999f106",
+        "type": "inject",
+        "z": "72c8828406909cd5",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "900",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 210,
+        "y": 1660,
+        "wires": [
+            [
+                "abfa706a9084ed17"
+            ]
+        ]
+    },
+    {
+        "id": "6a3e5b7e94c2f435",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Weather Decision Input",
+        "func": "const weather = msg.payload;\n\nif (!weather || !weather.next6h || !weather.next24h) {\n    return null;\n}\n\n\n// =====================================================\n// 6-HOUR DATA\n// Used for near-term monitoring\n// =====================================================\n\nconst next6h = weather.next6h;\n\nlet maxPop6h = 0;\nlet totalRain6h = 0;\n\nnext6h.forEach(block => {\n\n    maxPop6h = Math.max(maxPop6h, block.pop);\n\n    totalRain6h += block.rain;\n\n});\n\n\n// =====================================================\n// 24-HOUR DATA\n// Used for prediction\n// =====================================================\n\nconst next24h = weather.next24h;\n\nlet maxPop24h = 0;\nlet totalRain24h = 0;\n\nnext24h.forEach(block => {\n\n    maxPop24h = Math.max(maxPop24h, block.pop);\n\n    totalRain24h += block.rain;\n\n});\n\n\n// =====================================================\n// CURRENT / NEXT FORECAST BLOCK\n// =====================================================\n\nconst current = next6h[0];\n\n\n// =====================================================\n// FINAL DECISION INPUT\n// =====================================================\n\nmsg.payload = {\n\n    // Near-term rain\n    rain_probability_6h: Number((maxPop6h * 100).toFixed(0)),\n    rain_volume_6h: Number(totalRain6h.toFixed(2)),\n\n    // 24-hour prediction\n    rain_probability_24h: Number((maxPop24h * 100).toFixed(0)),\n    rain_volume_24h: Number(totalRain24h.toFixed(2)),\n\n    // Required weather parameters\n    pressure: current.pressure,\n    humidity: current.humidity,\n    clouds: current.clouds,\n    wind_speed: current.speed,\n    wind_gust: current.gust,\n\n    // Forecast timestamp\n    dt: current.dt,\n\n    // Human-readable timestamp\n    forecast_time: new Date(current.dt * 1000).toISOString()\n\n};\n\n\n\nmsg.payload.rain_expected_6h =\n    msg.payload.rain_probability_6h > 60 || msg.payload.rain_volume_6h > 2;\n\n\n\nflow.set('weatherForecast', msg.payload);\nflow.set('weatherLastFetched', Date.now());\n\nreturn msg;\n\n\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1150,
+        "y": 1620,
+        "wires": [
+            [
+                "578d2c55a0f5f93a",
+                "1a211d3e3764df1e",
+                "8c3228da6cce6e70"
+            ]
+        ]
+    },
+    {
+        "id": "578d2c55a0f5f93a",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Weather Decision Input Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1230,
+        "y": 1540,
+        "wires": []
+    },
+    {
+        "id": "1a211d3e3764df1e",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Weather Change Detector",
+        "func": "const current = msg.payload;\n\nif (!current) {\n    return null;\n}\n\nconst previous = flow.get(\"previousWeatherDecision\");\n\n\n// =====================================================\n// FIRST WEATHER DATA\n// =====================================================\n\nif (!previous) {\n\n    flow.set(\n        \"previousWeatherDecision\",\n        current\n    );\n\n    msg.payload = {\n        changed: true,\n        reason: \"First weather data received\",\n        current: current\n    };\n\n    return msg;\n}\n\n\n// =====================================================\n// PARAMETERS THAT MATTER\n// =====================================================\n\nconst changed =\n    previous.rain_probability_6h !== current.rain_probability_6h ||\n    previous.rain_volume_6h !== current.rain_volume_6h ||\n\n    previous.rain_probability_24h !== current.rain_probability_24h ||\n    previous.rain_volume_24h !== current.rain_volume_24h ||\n\n    previous.pressure !== current.pressure ||\n    previous.humidity !== current.humidity ||\n    previous.clouds !== current.clouds ||\n\n    previous.wind_speed !== current.wind_speed ||\n    previous.wind_gust !== current.wind_gust;\n\n\n// =====================================================\n// SAVE CURRENT DATA\n// =====================================================\n\nflow.set(\n    \"previousWeatherDecision\",\n    current\n);\n\n\n// =====================================================\n// ONLY SEND WHEN IMPORTANT DATA CHANGED\n// =====================================================\n\nif (!changed) {\n    return null;\n}\n\n\nmsg.payload = {\n    changed: true,\n    previous: previous,\n    current: current\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1510,
+        "y": 1620,
+        "wires": [
+            [
+                "83133eba98424eae"
+            ]
+        ]
+    },
+    {
+        "id": "83133eba98424eae",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Weather Change Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1590,
+        "y": 1540,
+        "wires": []
+    },
+    {
+        "id": "c0d76993cb45850d",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Weather Processed Data Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 870,
+        "y": 1560,
+        "wires": []
+    },
+    {
+        "id": "312017fb88b36b08",
+        "type": "mqtt in",
+        "z": "72c8828406909cd5",
+        "name": "Water Level MQTT Input",
+        "topic": "team10/flood/zone1/level",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "0b25ba9ce3f7adc7",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 170,
+        "y": 620,
+        "wires": [
+            [
+                "24bb3f305c8e088d",
+                "abe8100587bb7ab9",
+                "67be812785c21e3a"
+            ]
+        ]
+    },
+    {
+        "id": "abe8100587bb7ab9",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Water Level MQTT Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 170,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "24bb3f305c8e088d",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Water Level DATA Processor",
+        "func": "// Water Level Data Processor\n// Validates the raw MQTT reading and rejects single-sample sensor glitches\n// (HC-SR04 false echoes) using a rolling median filter, before producing\n// a clean, timestamped value for the rest of the pipeline.\n\nlet level = Number(msg.payload);\n\n// Reject anything that isn't a real, finite number\nif (!Number.isFinite(level)) {\n    node.warn(\"Water Level Data Processor: invalid payload received - \" + msg.payload);\n    return null;\n}\n\n// Clamp to the expected 0-100% range\nif (level < 0) level = 0;\nif (level > 100) level = 100;\n\n// Rolling median over the last 5 readings — a single wild outlier gets\n// outvoted by the surrounding normal readings, but a real sustained\n// change still comes through within a couple of readings.\nconst WINDOW_SIZE = 5;\nlet buffer = context.get('levelBuffer') || [];\n\nbuffer.push(level);\nif (buffer.length > WINDOW_SIZE) {\n    buffer.shift();\n}\ncontext.set('levelBuffer', buffer);\n\nconst sorted = [...buffer].sort((a, b) => a - b);\nconst median = sorted[Math.floor(sorted.length / 2)];\n\nmsg.payload = {\n    level: Number(median.toFixed(2)),\n    level_instant: Number(level.toFixed(2)),   // the raw single reading, kept for reference\n    ts: Date.now()\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 480,
+        "y": 620,
+        "wires": [
+            [
+                "6a1b04d2aa5e7889",
+                "076419d0314aaf5d"
+            ]
+        ]
+    },
+    {
+        "id": "6a1b04d2aa5e7889",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Water Level Data Processor Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 520,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "076419d0314aaf5d",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Water Level EMA Smoother",
+        "func": "// Water Level EMA Smoother\n// Smooths the validated water level reading to reduce sensor noise\n// before it reaches the rate calculator.\n\nconst raw = msg.payload.level;\nconst ts  = msg.payload.ts;\n\nlet ema = context.get('emaLevel');\n\nif (ema === undefined) {\n    ema = raw;   // first reading — start the average at the actual value\n} else {\n    ema = (0.3 * raw) + (0.7 * ema);\n}\n\ncontext.set('emaLevel', ema);\n\nmsg.payload = {\n    level_raw: raw,\n    level_ema: Number(ema.toFixed(2)),\n    ts: ts\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 860,
+        "y": 620,
+        "wires": [
+            [
+                "a88d84c209736049",
+                "b07d0a70e9704099",
+                "afca11377e2e327d"
+            ]
+        ]
+    },
+    {
+        "id": "a88d84c209736049",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Water Level EMA Smoother Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 900,
+        "y": 520,
+        "wires": []
+    },
+    {
+        "id": "b07d0a70e9704099",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Water Level Rate Calculator ",
+        "func": "// Water Level Rate Calculator\n// Computes rate of change (%/min), with a guard against implausibly\n// short gaps between messages (reconnect bursts, duplicate delivery)\n// which would otherwise spike the rate to unrealistic values.\n\nconst raw = msg.payload.level_raw;\nconst ema = msg.payload.level_ema;\nconst ts = msg.payload.ts;\n\nconst previousLevel = context.get('prevLevel');\nconst previousTime = context.get('prevTime');\nconst lastRate = context.get('lastRate') || 0;\n\nconst MIN_GAP_MINUTES = 1 / 60;\n\nlet rate = lastRate;\n\nif (previousLevel !== undefined && previousTime !== undefined) {\n    const timeMinutes = (ts - previousTime) / 60000;\n\n    if (timeMinutes >= MIN_GAP_MINUTES) {\n        rate = (ema - previousLevel) / timeMinutes;\n\n        context.set('prevLevel', ema);\n        context.set('prevTime', ts);\n        context.set('lastRate', rate);\n    }\n} else {\n    context.set('prevLevel', ema);\n    context.set('prevTime', ts);\n    context.set('lastRate', 0);\n    rate = 0;\n}\n\nmsg.payload = {\n    level_raw: raw,\n    level_ema: ema,\n    rate: Number(rate.toFixed(2)),\n    ts: ts\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1220,
+        "y": 620,
+        "wires": [
+            [
+                "8a8de11836697d4f",
+                "78e6776b776dd2d8",
+                "929f6a8e6fc3efa3"
+            ]
+        ]
+    },
+    {
+        "id": "8a8de11836697d4f",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Water Level Rate Calculator Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1260,
+        "y": 520,
+        "wires": []
+    },
+    {
+        "id": "86c72f26531001a1",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Water Risk Classifier",
+        "func": "// =====================================================\n// WATER RISK CLASSIFIER — WEATHER AWARE\n// =====================================================\n\nconst ema = Number(msg.payload.level_ema);\nconst rate = Number(msg.payload.rate);\n\nif (!Number.isFinite(ema) || !Number.isFinite(rate)) {\n    return null;\n}\n\n\n// =====================================================\n// GET LATEST WEATHER DATA\n// =====================================================\n\nconst weather = flow.get(\"weatherForecast\") || {};\n\nconst rainProb6h = Number(weather.rain_probability_6h || 0);\nconst rainVolume6h = Number(weather.rain_volume_6h || 0);\n\nconst rainProb24h = Number(weather.rain_probability_24h || 0);\nconst rainVolume24h = Number(weather.rain_volume_24h || 0);\n\nconst humidity = Number(weather.humidity || 0);\nconst clouds = Number(weather.clouds || 0);\nconst windSpeed = Number(weather.wind_speed || 0);\nconst windGust = Number(weather.wind_gust || 0);\n\n\n// =====================================================\n// WEATHER FRESHNESS GATE\n// =====================================================\n\nconst WEATHER_STALE_THRESHOLD_MS = 20 * 60 * 1000; // 20 minutes\n//const WEATHER_STALE_THRESHOLD_MS = 60 * 1000; // 1 minute\n\nconst weatherLastFetched = flow.get(\"weatherLastFetched\");\n\nconst weatherAgeMs = weatherLastFetched\n    ? Date.now() - weatherLastFetched\n    : null;\n\nconst weatherIsStale =\n    !weatherLastFetched ||\n    weatherAgeMs > WEATHER_STALE_THRESHOLD_MS;\n\n// Ignore weather influence when forecast data is stale.\n// Raw weather values remain unchanged for display.\nconst effRainProb6h =\n    weatherIsStale ? 0 : rainProb6h;\n\nconst effRainVolume6h =\n    weatherIsStale ? 0 : rainVolume6h;\n\nconst effRainVolume24h =\n    weatherIsStale ? 0 : rainVolume24h;\n\nconst effHumidity =\n    weatherIsStale ? 0 : humidity;\n\nconst effClouds =\n    weatherIsStale ? 0 : clouds;\n\n\n\n\n\n// =====================================================\n// BASE THRESHOLDS\n// =====================================================\n\nlet levelWatch = 40;\nlet levelAlert = 60;\nlet levelCritical = 80;\n\nlet rateAlert = 3;\nlet rateCritical = 5;\n\n\n// =====================================================\n// WEATHER SEVERITY SCORE\n// =====================================================\n\n// Rain probability contribution\nlet weatherScore = 0;\n\nif (effRainProb6h >= 80) weatherScore += 3;\nelse if (effRainProb6h >= 60) weatherScore += 2;\nelse if (effRainProb6h >= 40) weatherScore += 1;\n\n\n// Rain volume contribution\n\nif (effRainVolume6h >= 10) weatherScore += 3;\nelse if (effRainVolume6h >= 5) weatherScore += 2;\nelse if (effRainVolume6h >= 2) weatherScore += 1;\n\n\n// 24-hour rainfall adds predictive context\n\nif (effRainVolume24h >= 20) weatherScore += 2;\nelse if (effRainVolume24h >= 10) weatherScore += 1;\n\n\n// Supporting weather conditions\n\nif (effRainVolume24h >= 20) weatherScore += 2;\nelse if (effRainVolume24h >= 10) weatherScore += 1;\n\n\n\n\n// =====================================================\n// ADAPT THRESHOLDS\n// =====================================================\n\nif (weatherScore >= 6) {\n\n    // Severe weather expected\n    levelWatch = 30;\n    levelAlert = 50;\n    levelCritical = 70;\n\n    rateAlert = 2;\n    rateCritical = 4;\n\n}\nelse if (weatherScore >= 4) {\n\n    // Moderate weather risk\n    levelWatch = 35;\n    levelAlert = 55;\n    levelCritical = 75;\n\n    rateAlert = 2.5;\n    rateCritical = 4.5;\n\n}\nelse if (weatherScore >= 2) {\n\n    // Mild weather risk\n    levelWatch = 38;\n    levelAlert = 58;\n    levelCritical = 78;\n\n    rateAlert = 2.8;\n    rateCritical = 4.8;\n}\n\n\n// =====================================================\n// FINAL WATER RISK\n// =====================================================\n\nlet state = \"NORMAL\";\n\nif (ema >= levelCritical || rate >= rateCritical) {\n\n    state = \"CRITICAL\";\n\n}\nelse if (ema >= levelAlert || rate >= rateAlert) {\n\n    state = \"ALERT\";\n\n}\nelse if (ema >= levelWatch || effRainProb6h >= 60) {\n\n    state = \"WATCH\";\n\n}\n\n\n// =====================================================\n// FLOAT SWITCH OVERRIDE\n// =====================================================\n\nif (flow.get(\"floatSwitchTripped\")) {\n    state = \"CRITICAL\";\n}\n\n\n\n// =====================================================\n// OUTPUT\n// =====================================================\n\nmsg.payload = {\n\n    level: Number(ema.toFixed(2)),\n    rate: Number(rate.toFixed(2)),\n\n    state: state,\n\n    weather_score: weatherScore,\n\n    rain_probability_6h: rainProb6h,\n    rain_volume_6h: rainVolume6h,\n\n    rain_probability_24h: rainProb24h,\n    rain_volume_24h: rainVolume24h,\n\n    humidity: humidity,\n    clouds: clouds,\n\n    wind_speed: windSpeed,\n    wind_gust: windGust,\n\n    weather_adjusted: weatherScore > 0,\n\n    weather_stale: weatherIsStale,\n    weather_age_seconds: weatherAgeMs !== null ? Math.round(weatherAgeMs / 1000) : null,\n\n    ts: msg.payload.ts\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1760,
+        "y": 640,
+        "wires": [
+            [
+                "8981f48a853dc732",
+                "ac2ec16e39e2dc1c",
+                "9f62285ab26e98c5",
+                "e1a6898071ecfb30"
+            ]
+        ]
+    },
+    {
+        "id": "8981f48a853dc732",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Water Risk Classifier Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1800,
+        "y": 580,
+        "wires": []
+    },
+    {
+        "id": "ac2ec16e39e2dc1c",
+        "type": "rbe",
+        "z": "72c8828406909cd5",
+        "name": "Risk State Change Filter",
+        "func": "rbe",
+        "gap": "",
+        "start": "",
+        "inout": "out",
+        "septopics": true,
+        "property": "payload.state",
+        "topi": "topic",
+        "x": 2050,
+        "y": 680,
+        "wires": [
+            [
+                "457e8673f8db96ef",
+                "b64eb7e193c415ce"
+            ]
+        ]
+    },
+    {
+        "id": "c258f7256aaf0ff9",
+        "type": "ui-led",
+        "z": "72c8828406909cd5",
+        "name": "Risk Status LED",
+        "group": "ee8fd4b214124f49",
+        "order": 4,
+        "width": 0,
+        "height": 0,
+        "label": "Status LED",
+        "labelPlacement": "left",
+        "labelAlignment": "left",
+        "states": [
+            {
+                "value": "NORMAL",
+                "valueType": "str",
+                "color": "#34b75b"
+            },
+            {
+                "value": "WATCH",
+                "valueType": "str",
+                "color": "#aeba6d"
+            },
+            {
+                "value": "ALERT",
+                "valueType": "str",
+                "color": "#e09c3e"
+            },
+            {
+                "value": "CRITICAL",
+                "valueType": "str",
+                "color": "#bf0d0d"
+            }
+        ],
+        "allowColorForValueInMessage": false,
+        "shape": "circle",
+        "showBorder": true,
+        "showGlow": true,
+        "x": 2580,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "d14e8dbbab67a538",
+        "type": "ui-notification",
+        "z": "72c8828406909cd5",
+        "ui": "a0a17f36f9e31d8b",
+        "position": "top right",
+        "colorDefault": true,
+        "color": "#000000",
+        "displayTime": "3",
+        "showCountdown": true,
+        "outputs": 1,
+        "allowDismiss": true,
+        "dismissText": "Close",
+        "allowConfirm": false,
+        "confirmText": "Confirm",
+        "raw": false,
+        "className": "",
+        "name": "Flood Risk Notification",
+        "x": 3120,
+        "y": 360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "457e8673f8db96ef",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Risk State Output",
+        "func": "if (msg.payload && msg.payload.state) {\n    msg.payload = msg.payload.state;\n    return msg;\n}\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2310,
+        "y": 680,
+        "wires": [
+            [
+                "c258f7256aaf0ff9",
+                "b1dee05171ea4bb8",
+                "c5304e389a91e6f1",
+                "b021c108ab602e6e",
+                "b4ac6629c5fd4eb1",
+                "c5139ac6271a3dd9",
+                "af4df86ac5555280",
+                "c317a4a025850390",
+                "8c3228da6cce6e70"
+            ]
+        ]
+    },
+    {
+        "id": "b64eb7e193c415ce",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Risk Notification Message",
+        "func": "const risk = msg.payload;\n\nif (!risk || !risk.state) {\n    return null;\n}\n\nmsg.payload =\n    \"FLOOD RISK: \" + risk.state +\n    \" | Water Level: \" + Number(risk.level).toFixed(1) + \"%\" +\n    \" | Rise Rate: \" + Number(risk.rate).toFixed(2) + \"%/min\";\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2510,
+        "y": 360,
+        "wires": [
+            [
+                "d14e8dbbab67a538"
+            ]
+        ]
+    },
+    {
+        "id": "b1dee05171ea4bb8",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Water Risk LED CMD",
+        "func": "// Water Risk LED Command\n// Maps the 4-level risk state down to the 3 physical LED colors on the ESP32,\n// and publishes the command the ESP32's MQTT callback already listens for.\n\nconst state = msg.payload;\n\nlet color = \"GREEN\";\n\nif (state === \"CRITICAL\") {\n    color = \"RED\";\n} else if (state === \"ALERT\") {\n    color = \"YELLOW\";\n} else {\n    color = \"GREEN\";   // NORMAL and WATCH both stay green\n}\n\nmsg.payload = color;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2600,
+        "y": 660,
+        "wires": [
+            [
+                "e95398871de51036"
+            ]
+        ]
+    },
+    {
+        "id": "e95398871de51036",
+        "type": "mqtt out",
+        "z": "72c8828406909cd5",
+        "name": "Risk LED Indicator ",
+        "topic": "team10/flood/zone1/actuator/led",
+        "qos": "0",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "0b25ba9ce3f7adc7",
+        "x": 2890,
+        "y": 660,
+        "wires": []
+    },
+    {
+        "id": "78e6776b776dd2d8",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Time To Cirtical Predictor ",
+        "func": "// =====================================================\n// RAIN-ADJUSTED TIME-TO-CRITICAL PREDICTOR\n// =====================================================\n\nconst level = Number(msg.payload.level_ema);\nconst rate = Number(msg.payload.rate);\n\nif (!Number.isFinite(level) || !Number.isFinite(rate)) {\n    return null;\n}\n\n\n// -----------------------------------------------------\n// GET LATEST WEATHER\n// -----------------------------------------------------\n\nconst weather = flow.get(\"weatherForecast\") || {};\n\nconst rainProb6h = Number(weather.rain_probability_6h || 0);\nconst rainVolume6h = Number(weather.rain_volume_6h || 0);\n\n\n// -----------------------------------------------------\n// BASE CRITICAL LEVEL\n// -----------------------------------------------------\n\nconst CRITICAL_LEVEL = 80;\n\n\n// -----------------------------------------------------\n// CALCULATE BASE TIME TO CRITICAL\n// -----------------------------------------------------\n\nlet baseTime = null;\n\nif (rate > 0 && level < CRITICAL_LEVEL) {\n\n    const remaining = CRITICAL_LEVEL - level;\n\n    baseTime = remaining / rate;\n}\n\n\n// -----------------------------------------------------\n// ESTIMATE RAIN IMPACT\n// -----------------------------------------------------\n\nlet rainFactor = 1.0;\n\nif (rainProb6h >= 80 || rainVolume6h >= 10) {\n\n    rainFactor = 1.35;\n\n}\nelse if (rainProb6h >= 60 || rainVolume6h >= 5) {\n\n    rainFactor = 1.20;\n\n}\nelse if (rainProb6h >= 40 || rainVolume6h >= 2) {\n\n    rainFactor = 1.10;\n}\n\n\n// -----------------------------------------------------\n// RAIN-ADJUSTED PREDICTION\n// -----------------------------------------------------\n\nlet adjustedTime = null;\n\nif (baseTime !== null) {\n\n    adjustedTime = baseTime / rainFactor;\n}\n\n\n// -----------------------------------------------------\n// ADD VALUES TO MESSAGE\n// -----------------------------------------------------\n\nmsg.payload.time_to_critical_min =\n    adjustedTime !== null\n        ? Number(adjustedTime.toFixed(1))\n        : null;\n\nmsg.payload.base_time_to_critical_min =\n    baseTime !== null\n        ? Number(baseTime.toFixed(1))\n        : null;\n\nmsg.payload.rain_factor = rainFactor;\n\nmsg.payload.rain_probability_6h = rainProb6h;\nmsg.payload.rain_volume_6h = rainVolume6h;\n\n\n// -----------------------------------------------------\n// HUMAN-READABLE MESSAGE\n// -----------------------------------------------------\n\nif (level >= CRITICAL_LEVEL) {\n\n    msg.payload.critical_prediction =\n        \"CRITICAL: Water level already at critical level\";\n\n}\nelse if (adjustedTime !== null && rainFactor > 1) {\n\n    msg.payload.critical_prediction =\n        \"Rain-adjusted critical level in approximately \" +\n        adjustedTime.toFixed(1) +\n        \" minutes\";\n\n}\nelse if (adjustedTime !== null) {\n\n    msg.payload.critical_prediction =\n        \"Critical level in approximately \" +\n        adjustedTime.toFixed(1) +\n        \" minutes\";\n\n}\nelse {\n\n    msg.payload.critical_prediction =\n        \"Water level is not currently rising\";\n\n}\n\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1450,
+        "y": 700,
+        "wires": [
+            [
+                "376061ac743bc291",
+                "86c72f26531001a1",
+                "ef9af3575f6c2ec5"
+            ]
+        ]
+    },
+    {
+        "id": "376061ac743bc291",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Time To Cirtical Predictor Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1630,
+        "y": 820,
+        "wires": []
+    },
+    {
+        "id": "47461367e6713a4e",
+        "type": "ui-gauge",
+        "z": "72c8828406909cd5",
+        "name": "Zone 1 Water Level",
+        "group": "067f67d85049edf2",
+        "order": 3,
+        "value": "payload",
+        "valueType": "msg",
+        "width": "4",
+        "height": 3,
+        "gtype": "gauge-half",
+        "gstyle": "needle",
+        "title": "Zone 1 Water Level",
+        "alwaysShowTitle": false,
+        "floatingTitlePosition": "top-left",
+        "units": "Water Level (%)",
+        "icon": "water",
+        "prefix": "",
+        "suffix": "",
+        "segments": [
+            {
+                "from": "0",
+                "color": "#5cd65c",
+                "text": "",
+                "textType": "label"
+            },
+            {
+                "from": "60",
+                "color": "#ffc800",
+                "text": "",
+                "textType": "label"
+            },
+            {
+                "from": "80",
+                "color": "#ea5353",
+                "text": "",
+                "textType": "label"
+            }
+        ],
+        "min": 0,
+        "max": "100",
+        "sizeThickness": 16,
+        "sizeGap": 4,
+        "sizeKeyThickness": 8,
+        "styleRounded": true,
+        "styleGlow": false,
+        "className": "water-level-gauge",
+        "x": 1330,
+        "y": 800,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "afca11377e2e327d",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Water Level Display Data",
+        "func": "msg.payload=msg.payload.level_ema;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1050,
+        "y": 720,
+        "wires": [
+            [
+                "47461367e6713a4e",
+                "60fdabc0aa594955"
+            ]
+        ]
+    },
+    {
+        "id": "22f7eced8cb0a880",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Weather Dashboard Formatter",
+        "func": "// Weather Dashboard Formatter\n\nconst weather = msg.payload;\n\nif (!weather || !weather.next6h || !weather.next6h.length) {\n    return null;\n}\n\nconst current = weather.next6h[0];\n\nconst rainProbability = Math.round(current.pop * 100);\nconst rainVolume = Number(current.rain).toFixed(1);\nconst humidity = current.humidity;\nconst windSpeed = Number(current.speed).toFixed(1);\n\nmsg.payload =\n    `Rain: ${rainProbability}% (${rainVolume} mm) next 3h | ` +\n    `Humidity: ${humidity}% | ` +\n    `Wind: ${windSpeed} m/s`;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1170,
+        "y": 1700,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "ef9af3575f6c2ec5",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": " Time To Critical Dashboard",
+        "func": "// Time To Critical Dashboard\n\nconst prediction = msg.payload.critical_prediction;\n\nif (!prediction) {\n    return null;\n}\n\n// Store the latest prediction for the Risk State Cache.\nflow.set('latestPrediction', prediction);\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1780,
+        "y": 740,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c5304e389a91e6f1",
+        "type": "ui-text",
+        "z": "72c8828406909cd5",
+        "group": "ee8fd4b214124f49",
+        "order": 2,
+        "width": 0,
+        "height": 0,
+        "name": "Risk State Display",
+        "label": "Current Status",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "risk-status",
+        "value": "payload",
+        "valueType": "msg",
+        "x": 2550,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "b021c108ab602e6e",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Escalation Timer",
+        "func": "// Escalation Timer\n\nconst state = msg.payload;\n\n// Clear timer when system returns to NORMAL\nif (state === \"NORMAL\") {\n    const existing = context.get(\"escalationTimer\");\n\n    if (existing) {\n        clearTimeout(existing);\n    }\n\n    context.set(\"escalationTimer\", null);\n    flow.set(\"ackReceived\", false);\n    flow.set(\"lastEmailState\", null);\n\n    return null;\n}\n\n\n// Start timer only when entering ALERT\nif (state === \"ALERT\") {\n\n    const existing = context.get(\"escalationTimer\");\n\n    // Timer already running, do nothing\n    if (existing) {\n        return null;\n    }\n\n    // New ALERT episode\n    flow.set(\"ackReceived\", false);\n\n    const timer = setTimeout(() => {\n\n        if (!flow.get(\"ackReceived\")) {\n\n            node.send({\n                payload: \"ESCALATED: No acknowledgment received, treat as CRITICAL\"\n            });\n        }\n\n        context.set(\"escalationTimer\", null);\n\n    }, 60000);\n\n    context.set(\"escalationTimer\", timer);\n}\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2600,
+        "y": 560,
+        "wires": [
+            [
+                "7cfd7d1e3890d7e8",
+                "3a4895faca342ad6"
+            ]
+        ]
+    },
+    {
+        "id": "7cfd7d1e3890d7e8",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Escalation Notification Formatter",
+        "func": "msg.payload = \"\\u{1F6A8} \" + msg.payload;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2850,
+        "y": 440,
+        "wires": [
+            [
+                "d14e8dbbab67a538",
+                "ebe3364491107ce4"
+            ]
+        ]
+    },
+    {
+        "id": "3a4895faca342ad6",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Escalation LED Override",
+        "func": "msg.payload = \"RED\";\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2890,
+        "y": 560,
+        "wires": [
+            [
+                "e95398871de51036"
+            ]
+        ]
+    },
+    {
+        "id": "f18e1886e95fb287",
+        "type": "email-send",
+        "z": "72c8828406909cd5",
+        "transport": "d4378c6f53dd793c",
+        "from": "vivekpatnem24csds@rnsit.ac.in",
+        "to": "christosaviogeorge24csds@rnsit.ac.in , vivekpatnem@gmail.com, adityamathad19@gmail.com",
+        "cc": "",
+        "bcc": "",
+        "subject": "Smart Drain Flood Alert",
+        "contentType": "text",
+        "priority": "normal",
+        "name": "",
+        "x": 2770,
+        "y": 780,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "b4ac6629c5fd4eb1",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Email Alert Filter",
+        "func": "// Email Alert Filter\n\nconst state = msg.payload;\n\n// Only send email for ALERT or CRITICAL\nif (state !== \"ALERT\" && state !== \"CRITICAL\") {\n    return null;\n}\n\n// Prevent repeated emails for the same state\nconst last = flow.get(\"lastEmailState\");\n\nif (last === state) {\n    return null;\n}\n\nflow.set(\"lastEmailState\", state);\n\nmsg.topic = \"Smart Drain Flood Alert - \" + state;\n\nmsg.payload =\n    \"Flood risk state changed to \" + state + \".\\n\\n\" +\n    \"Please check the Smart Drain Monitoring dashboard for live water level, \" +\n    \"weather conditions, prediction, and node status.\";\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2540,
+        "y": 740,
+        "wires": [
+            [
+                "f18e1886e95fb287"
+            ]
+        ]
+    },
+    {
+        "id": "2c5d6e9e0d6f8fe7",
+        "type": "ui-form",
+        "z": "72c8828406909cd5",
+        "name": "location",
+        "group": "a028831610cda710",
+        "label": "Zone / Location",
+        "order": 2,
+        "width": "6",
+        "height": "9",
+        "options": [
+            {
+                "label": "Zone / Location",
+                "key": "location",
+                "type": "text",
+                "required": true,
+                "rows": null
+            },
+            {
+                "label": "Issue Type",
+                "key": "issue_type",
+                "type": "dropdown",
+                "required": true,
+                "rows": null
+            },
+            {
+                "label": "Description",
+                "key": "description",
+                "type": "multiline",
+                "required": true,
+                "rows": 4
+            }
+        ],
+        "formValue": {
+            "location": "",
+            "issue_type": "",
+            "description": ""
+        },
+        "payload": "",
+        "submit": "submit",
+        "cancel": "clear",
+        "resetOnSubmit": true,
+        "topic": "topic",
+        "topicType": "msg",
+        "splitLayout": "",
+        "className": "",
+        "passthru": false,
+        "dropdownOptions": [
+            {
+                "dropdown": "issue_type",
+                "value": "Blockage",
+                "label": "Blockage"
+            },
+            {
+                "dropdown": "issue_type",
+                "value": "Overflow",
+                "label": "Overflow"
+            },
+            {
+                "dropdown": "issue_type",
+                "value": "Damaged Cover",
+                "label": "Damaged Cover"
+            },
+            {
+                "dropdown": "issue_type",
+                "value": "Garbage",
+                "label": "Garbage"
+            }
+        ],
+        "x": 1280,
+        "y": 1200,
+        "wires": [
+            [
+                "4855838f9e4d425d"
+            ]
+        ]
+    },
+    {
+        "id": "60fdabc0aa594955",
+        "type": "ui-chart",
+        "z": "72c8828406909cd5",
+        "group": "3eb8addf49382ca2",
+        "name": "Zone 1 Water Level History",
+        "label": "Zone 1 Water Level History",
+        "order": 1,
+        "chartType": "line",
+        "category": "topic",
+        "categoryType": "msg",
+        "xAxisLabel": "",
+        "xAxisProperty": "",
+        "xAxisPropertyType": "timestamp",
+        "xAxisType": "time",
+        "xAxisFormat": "",
+        "xAxisFormatType": "auto",
+        "xmin": "",
+        "xmax": "",
+        "yAxisLabel": "Water Level (%)",
+        "yAxisProperty": "payload",
+        "yAxisPropertyType": "msg",
+        "ymin": "0",
+        "ymax": "100",
+        "bins": 10,
+        "action": "append",
+        "stackSeries": false,
+        "pointShape": "circle",
+        "pointRadius": 4,
+        "showLegend": true,
+        "removeOlder": "10",
+        "removeOlderUnit": "60",
+        "removeOlderPoints": "",
+        "colors": [
+            "#0095ff",
+            "#ff0000",
+            "#ff7f0e",
+            "#2ca02c",
+            "#a347e1",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "textColor": [
+            "#666666"
+        ],
+        "textColorDefault": true,
+        "gridColor": [
+            "#e5e5e5"
+        ],
+        "gridColorDefault": true,
+        "width": null,
+        "height": null,
+        "className": "water-history-chart",
+        "interpolation": "linear",
+        "x": 1340,
+        "y": 880,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "f3d5c93d58d2b416",
+        "type": "ui-template",
+        "z": "72c8828406909cd5",
+        "group": "653574f30dcf7cc3",
+        "page": "",
+        "ui": "",
+        "name": "Risk Event History",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "head": "",
+        "format": "<template>\n\n  <div class=\"reh-card\">\n\n    <!-- Header -->\n    <div class=\"reh-header\">\n      <div>\n        <div class=\"reh-title\">Recent Events &amp; Alerts</div>\n        <div class=\"reh-subtitle\">Latest system events</div>\n      </div>\n\n      <div class=\"reh-live\">\n        <span class=\"reh-live-dot\"></span>\n        Live\n      </div>\n    </div>\n\n    <!-- Event List -->\n    <div class=\"reh-list\">\n\n      <div\n        v-for=\"(item, idx) in events\"\n        :key=\"idx\"\n        class=\"reh-row\"\n      >\n\n        <span class=\"reh-time\">\n          {{ item.time }}\n        </span>\n\n        <span\n          :class=\"['reh-badge', badgeClass(item.state)]\"\n        >\n          {{ item.state }}\n        </span>\n\n      </div>\n\n      <div\n        v-if=\"!events.length\"\n        class=\"reh-empty\"\n      >\n        No events yet\n      </div>\n\n    </div>\n\n  </div>\n\n</template>\n\n\n<script>\n\nexport default {\n\n  computed: {\n\n    events() {\n      return Array.isArray(this.msg?.payload)\n        ? this.msg.payload\n        : [];\n    }\n\n  },\n\n  methods: {\n\n    badgeClass(state) {\n\n      const map = {\n\n        NORMAL: 'badge-normal',\n\n        WATCH: 'badge-watch',\n\n        ALERT: 'badge-alert',\n\n        CRITICAL: 'badge-critical',\n\n        ESCALATED: 'badge-escalated'\n\n      };\n\n      return map[state] || 'badge-default';\n\n    }\n\n  }\n\n}\n\n</script>\n\n\n<style scoped>\n\n/* =========================================================\n   EVENT HISTORY CARD\n   ========================================================= */\n\n.reh-card {\n\n  width: 100%;\n\n  font-family:\n    'Inter',\n    'Segoe UI',\n    sans-serif;\n\n}\n\n\n/* =========================================================\n   HEADER\n   ========================================================= */\n\n.reh-header {\n\n  display: flex;\n\n  align-items: center;\n\n  justify-content: space-between;\n\n  padding:\n    4px\n    4px\n    14px\n    4px;\n\n}\n\n\n.reh-title {\n\n  font-size: 18px;\n\n  font-weight: 700;\n\n  color: #2B2A28;\n\n  letter-spacing: -0.2px;\n\n}\n\n\n.reh-subtitle {\n\n  margin-top: 3px;\n\n  font-size: 12px;\n\n  color: #6B6A68;\n\n}\n\n\n/* =========================================================\n   LIVE BADGE\n   ========================================================= */\n\n.reh-live {\n\n  display: flex;\n\n  align-items: center;\n\n  gap: 7px;\n\n  padding:\n    6px\n    11px;\n\n  border-radius: 999px;\n\n  background:\n    rgba(47, 174, 123, 0.08);\n\n  border:\n    1px solid\n    rgba(47, 174, 123, 0.14);\n\n  color: #2FAE7B;\n\n  font-size: 12px;\n\n  font-weight: 600;\n\n}\n\n\n.reh-live-dot {\n\n  width: 7px;\n\n  height: 7px;\n\n  border-radius: 50%;\n\n  background: #2FAE7B;\n\n}\n\n\n/* =========================================================\n   EVENT LIST\n   ========================================================= */\n\n.reh-list {\n\n  max-height: 260px;\n\n  overflow-y: auto;\n\n  display: flex;\n\n  flex-direction: column;\n\n  gap: 8px;\n\n  padding-right: 4px;\n\n}\n\n\n/* =========================================================\n   EVENT ROW\n   ========================================================= */\n\n.reh-row {\n\n  display: flex;\n\n  align-items: center;\n\n  justify-content: space-between;\n\n  padding:\n    10px\n    14px;\n\n  background: #FBF9F7;\n\n  border:\n    1px solid\n    rgba(0, 0, 0, 0.05);\n\n  border-radius: 14px;\n\n}\n\n\n/* =========================================================\n   TIME\n   ========================================================= */\n\n.reh-time {\n\n  font-size: 13px;\n\n  color: #6B6A68;\n\n  font-variant-numeric:\n    tabular-nums;\n\n}\n\n\n/* =========================================================\n   STATUS BADGE\n   ========================================================= */\n\n.reh-badge {\n\n  font-size: 12px;\n\n  font-weight: 600;\n\n  padding:\n    4px\n    12px;\n\n  border-radius: 999px;\n\n  letter-spacing: 0.3px;\n\n  white-space: nowrap;\n\n}\n\n\n/* NORMAL */\n\n.badge-normal {\n\n  background:\n    rgba(47, 174, 123, 0.12);\n\n  color: #2FAE7B;\n\n}\n\n\n/* WATCH */\n\n.badge-watch {\n\n  background:\n    rgba(59, 159, 224, 0.12);\n\n  color: #3B9FE0;\n\n}\n\n\n/* ALERT */\n\n.badge-alert {\n\n  background:\n    rgba(240, 169, 59, 0.14);\n\n  color: #B5761F;\n\n}\n\n\n/* CRITICAL */\n\n.badge-critical {\n\n  background:\n    rgba(232, 93, 78, 0.14);\n\n  color: #C43F2E;\n\n}\n\n\n/* ESCALATED */\n\n.badge-escalated {\n\n  background:\n    rgba(232, 93, 78, 0.18);\n\n  color: #C43F2E;\n\n  border:\n    1px solid\n    rgba(232, 93, 78, 0.30);\n\n}\n\n\n/* UNKNOWN STATE */\n\n.badge-default {\n\n  background:\n    rgba(0, 0, 0, 0.06);\n\n  color: #6B6A68;\n\n}\n\n\n/* =========================================================\n   EMPTY STATE\n   ========================================================= */\n\n.reh-empty {\n\n  text-align: center;\n\n  color: #6B6A68;\n\n  padding:\n    20px\n    0;\n\n  font-size: 13px;\n\n}\n\n\n/* =========================================================\n   SCROLLBAR\n   ========================================================= */\n\n.reh-list::-webkit-scrollbar {\n\n  width: 6px;\n\n}\n\n\n.reh-list::-webkit-scrollbar-thumb {\n\n  background:\n    rgba(0, 0, 0, 0.12);\n\n  border-radius: 10px;\n\n}\n\n\n/* =========================================================\n   MOBILE\n   ========================================================= */\n\n@media (max-width: 600px) {\n\n  .reh-title {\n\n    font-size: 16px;\n\n  }\n\n  .reh-row {\n\n    padding:\n      8px\n      10px;\n\n  }\n\n  .reh-time {\n\n    font-size: 12px;\n\n  }\n\n  .reh-badge {\n\n    font-size: 11px;\n\n    padding:\n      3px\n      10px;\n\n  }\n\n}\n\n</style>",
+        "storeOutMessages": true,
+        "passthru": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "event-history",
+        "x": 3270,
+        "y": 660,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c5139ac6271a3dd9",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Event Log Builder",
+        "func": "let log = flow.get('eventLog') || [];\n\nconst entry = {\n    time: new Date().toLocaleTimeString(),\n    state: msg.payload\n};\n\nlog.unshift(entry);\n\nif (log.length > 20) {\n    log = log.slice(0, 20);\n}\n\nflow.set('eventLog', log);\n\nmsg.payload = log;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3150,
+        "y": 760,
+        "wires": [
+            [
+                "f3d5c93d58d2b416"
+            ]
+        ]
+    },
+    {
+        "id": "ebe3364491107ce4",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Escalation Event Logger",
+        "func": "msg.payload = \"ESCALATED\";\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3190,
+        "y": 440,
+        "wires": [
+            [
+                "c5139ac6271a3dd9"
+            ]
+        ]
+    },
+    {
+        "id": "c2e3d1eb630f51f2",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Weather Panel Builder",
+        "func": "const w = msg.payload;\n\nif (!w) return null;\n\nconst current = w.next6h ? w.next6h[0] : w;\n\nmsg.payload = {\n\n    rain_prob_6h: w.rain_probability_6h ?? Math.round((current.pop || 0) * 100),\n\n    rain_vol_6h: w.rain_volume_6h ?? current.rain,\n\n    rain_prob_24h: w.rain_probability_24h ?? null,\n\n    rain_vol_24h: w.rain_volume_24h ?? null,\n\n    humidity: current.humidity,\n\n    temp: current.temp,\n\n    clouds: current.clouds,\n\n    wind_speed: current.speed ?? w.wind_speed,\n\n    wind_gust: current.gust ?? w.wind_gust,\n\n    pressure: current.pressure ?? w.pressure,\n\n    // Temporary location field\n    location:\n    msg.location?.city && msg.location?.country\n        ? `${msg.location.city}, ${msg.location.country}`\n        : \"Location unavailable\"\n\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1140,
+        "y": 1760,
+        "wires": [
+            [
+                "efd94b666aceebe5",
+                "ccc608f96879d428"
+            ]
+        ]
+    },
+    {
+        "id": "efd94b666aceebe5",
+        "type": "ui-template",
+        "z": "72c8828406909cd5",
+        "group": "39a23e35efd659ec",
+        "page": "",
+        "ui": "",
+        "name": "Weather Panel",
+        "order": 1,
+        "width": "",
+        "height": "",
+        "head": "",
+        "format": "<template>\n  <div class=\"weather-card\">\n\n    <div class=\"weather-header\">\n      <div>\n        <div class=\"weather-zone\">Zone 1</div>\n        <div class=\"weather-location\">\n          {{ msg.payload?.location ?? 'Location unavailable' }}\n        </div>\n      </div>\n\n      <div class=\"weather-condition\">\n        <span class=\"weather-dot\"></span>\n        Monitoring\n      </div>\n    </div>\n\n    <div class=\"weather-title\">\n      Current Weather Conditions\n    </div>\n\n    <div class=\"weather-stats\">\n\n      <div class=\"weather-stat rain\">\n        <div class=\"stat-icon\">💧</div>\n        <div>\n          <div class=\"stat-label\">Rain (6h)</div>\n          <div class=\"stat-value\">\n            {{ msg.payload?.rain_prob_6h ?? 0 }}%\n          </div>\n          <div class=\"stat-meta\">\n            {{ msg.payload?.rain_vol_6h ?? 0 }} mm\n          </div>\n        </div>\n      </div>\n\n      <div class=\"weather-stat\">\n        <div class=\"stat-icon\">◉</div>\n        <div>\n          <div class=\"stat-label\">Humidity</div>\n          <div class=\"stat-value\">\n            {{ msg.payload?.humidity ?? 0 }}%\n          </div>\n        </div>\n      </div>\n\n\n      <div class=\"weather-stat\">\n        <div class=\"stat-icon\">🌡️</div>\n        <div>\n          <div class=\"stat-label\">Temperature</div>\n          <div class=\"stat-value\">\n            {{ msg.payload?.temp ?? 0 }}°C\n          </div>\n        </div>\n      </div>\n\n\n      <div class=\"weather-stat\">\n        <div class=\"stat-icon\">☁</div>\n        <div>\n          <div class=\"stat-label\">Clouds</div>\n          <div class=\"stat-value\">\n            {{ msg.payload?.clouds ?? 0 }}%\n          </div>\n        </div>\n      </div>\n\n      <div class=\"weather-stat\">\n        <div class=\"stat-icon\">≋</div>\n        <div>\n          <div class=\"stat-label\">Wind</div>\n          <div class=\"stat-value\">\n            {{ msg.payload?.wind_speed ?? 0 }} m/s\n          </div>\n\n          <div class=\"stat-meta\">\n            Gust: {{ msg.payload?.wind_gust ?? 0 }} m/s\n          </div>\n        </div>\n      </div>\n\n      <div class=\"weather-stat\">\n        <div class=\"stat-icon\">◌</div>\n        <div>\n          <div class=\"stat-label\">Pressure</div>\n          <div class=\"stat-value\">\n            {{ msg.payload?.pressure ?? 0 }} hPa\n          </div>\n        </div>\n      </div>\n\n    </div>\n\n  </div>\n</template>\n\n<style>\n.weather-card {\n  width: 100%;\n  box-sizing: border-box;\n  padding: 18px 20px;\n  border-radius: 20px;\n\n  background:\n    linear-gradient(\n      135deg,\n      rgba(238, 249, 255, 0.95),\n      rgba(255, 255, 255, 0.98)\n    );\n\n  border: 1px solid rgba(59, 159, 224, 0.12);\n\n  box-shadow:\n    0 8px 28px rgba(40, 35, 30, 0.05);\n\n  color: #292725;\n}\n\n.weather-header {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 20px;\n}\n\n.weather-zone {\n  font-size: 22px;\n  font-weight: 750;\n  letter-spacing: -0.3px;\n}\n\n.weather-location {\n  margin-top: 3px;\n  font-size: 13px;\n  color: #706d69;\n}\n\n.weather-condition {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n\n  padding: 8px 13px;\n  border-radius: 999px;\n\n  background: rgba(255, 255, 255, 0.8);\n  border: 1px solid rgba(59, 159, 224, 0.12);\n\n  font-size: 12px;\n  font-weight: 600;\n  color: #4f6f82;\n}\n\n.weather-dot {\n  width: 8px;\n  height: 8px;\n  border-radius: 50%;\n  background: #3b9fe0;\n}\n\n.weather-title {\n  margin-top: 14px;\n  margin-bottom: 12px;\n\n  font-size: 14px;\n  font-weight: 650;\n  color: #494744;\n}\n\n.weather-stats {\n  display: grid;\n  grid-template-columns: repeat(6, minmax(0, 1fr));\n\n  background: rgba(255, 255, 255, 0.72);\n\n  border: 1px solid rgba(59, 159, 224, 0.08);\n  border-radius: 16px;\n\n  overflow: hidden;\n}\n\n.weather-stat {\n  min-width: 0;\n  padding: 13px 14px;\n\n  display: flex;\n  align-items: flex-start;\n  gap: 10px;\n\n  border-right: 1px solid rgba(43, 42, 40, 0.06);\n}\n\n.weather-stat:last-child {\n  border-right: none;\n}\n\n.stat-icon {\n  flex-shrink: 0;\n\n  width: 28px;\n  height: 28px;\n\n  display: flex;\n  align-items: center;\n  justify-content: center;\n\n  border-radius: 10px;\n\n  background: rgba(59, 159, 224, 0.10);\n\n  color: #3b9fe0;\n  font-size: 14px;\n}\n\n.stat-label {\n  font-size: 11px;\n  color: #77736e;\n  margin-bottom: 3px;\n}\n\n.stat-value {\n  font-size: 14px;\n  font-weight: 700;\n  color: #292725;\n  white-space: nowrap;\n}\n\n.stat-meta {\n  margin-top: 2px;\n  font-size: 10px;\n  color: #817d78;\n  white-space: nowrap;\n}\n\n@media (max-width: 900px) {\n  .weather-stats {\n    grid-template-columns: repeat(2, 1fr);\n  }\n\n  .weather-stat {\n    border-right: none;\n    border-bottom: 1px solid rgba(43, 42, 40, 0.06);\n  }\n}\n\n@media (max-width: 600px) {\n  .weather-header {\n    align-items: flex-start;\n    flex-direction: column;\n    gap: 10px;\n  }\n\n  .weather-stats {\n    grid-template-columns: 1fr;\n  }\n\n  .weather-stat {\n    border-bottom: 1px solid rgba(43, 42, 40, 0.06);\n  }\n\n  .weather-stat:last-child {\n    border-bottom: none;\n  }\n}\n</style>",
+        "storeOutMessages": true,
+        "passthru": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1400,
+        "y": 1760,
+        "wires": [
+            [
+                "b5758c75822cce0a"
+            ]
+        ]
+    },
+    {
+        "id": "ccc608f96879d428",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Weather Panel Builder debug ",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1200,
+        "y": 1840,
+        "wires": []
+    },
+    {
+        "id": "b5758c75822cce0a",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "weather panel debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1520,
+        "y": 1840,
+        "wires": []
+    },
+    {
+        "id": "9379f4075dddbe52",
+        "type": "ui-template",
+        "z": "72c8828406909cd5",
+        "group": "",
+        "page": "d574872c27a167e7",
+        "ui": "",
+        "name": "Drain Monitor Theme",
+        "order": 0,
+        "width": 0,
+        "height": 0,
+        "head": "",
+        "format": "/* =========================================================\n   SMART DRAIN - DRAIN MONITOR\n   LIGHT SAAS THEME - STEP 1\n   ========================================================= */\n\n:root {\n    --sd-bg: #faf7f5;\n    --sd-card: #ffffff;\n    --sd-card-soft: #fcfbfa;\n\n    --sd-text: #292725;\n    --sd-text-secondary: #706d69;\n\n    --sd-coral: #e85d4e;\n    --sd-blue: #3b9fe0;\n    --sd-green: #2fae7b;\n    --sd-orange: #f0a93b;\n\n    --sd-border: rgba(43, 42, 40, 0.06);\n\n    --sd-radius: 24px;\n\n    --sd-shadow:\n        0 8px 30px rgba(40, 35, 30, 0.06),\n        0 2px 8px rgba(40, 35, 30, 0.03);\n}\n\n\n/* PAGE BACKGROUND */\n\n.v-main {\n    background: var(--sd-bg) !important;\n}\n\n\n/* DASHBOARD GROUPS */\n\n.nrdb-ui-group .v-card {\n    background: var(--sd-card) !important;\n\n    border-radius: var(--sd-radius) !important;\n\n    border: 1px solid var(--sd-border) !important;\n\n    box-shadow: var(--sd-shadow) !important;\n}\n\n\n/* GROUP TITLE */\n\n.nrdb-ui-group .v-card-title,\n.nrdb-ui-group-title {\n    color: var(--sd-text) !important;\n\n    font-weight: 700 !important;\n}\n\n\n/* GENERAL TEXT */\n\n.nrdb-ui-group {\n    color: var(--sd-text) !important;\n}\n\n\n/* SECONDARY TEXT */\n\n.nrdb-ui-group .text-medium-emphasis {\n    color: var(--sd-text-secondary) !important;\n}\n\n\n/* BUTTONS */\n\n.nrdb-ui-group .v-btn {\n    border-radius: 14px !important;\n\n    text-transform: none !important;\n\n    font-weight: 600 !important;\n}\n\n\n/* PRIMARY BUTTON */\n\n.nrdb-ui-group .v-btn--variant-elevated {\n    background: var(--sd-coral) !important;\n}\n\n\n/* HOVER */\n\n.nrdb-ui-group .v-btn:hover {\n    transform: translateY(-1px);\n\n    transition:\n        transform 0.18s ease,\n        box-shadow 0.18s ease;\n}\n\n\n/* SMOOTH CARD TRANSITION */\n\n.nrdb-ui-group .v-card {\n    transition:\n        box-shadow 0.2s ease,\n        transform 0.2s ease;\n}\n\n\n/* DESKTOP HOVER */\n\n@media (min-width: 1024px) {\n\n    .nrdb-ui-group .v-card:hover {\n        box-shadow:\n            0 12px 36px rgba(40, 35, 30, 0.08),\n            0 3px 10px rgba(40, 35, 30, 0.03) !important;\n    }\n\n}\n\n\n\n/* =========================================================\n   SYSTEM STATUS - SENSOR NODE\n   ========================================================= */\n\n.sensor-status {\n    background: #f8fffc !important;\n    border: 1px solid rgba(47, 174, 123, 0.12) !important;\n    border-radius: 14px !important;\n    padding: 10px 14px !important;\n    box-shadow: none !important;\n    transition: none !important;\n}\n\n\n/* =========================================================\n   SYSTEM STATUS - ACTUATOR NODE\n   ========================================================= */\n\n\n.actuator-status {\n    background: #fffaf4 !important;\n    border: 1px solid rgba(240, 169, 59, 0.14) !important;\n    border-radius: 14px !important;\n    padding: 10px 14px !important;\n    box-shadow: none !important;\n    transition: none !important;\n}\n\n\n/* =========================================================\n   SYSTEM STATUS - CURRENT RISK\n   ========================================================= */\n\n.risk-status {\n    margin-top: 6px !important;\n    padding: 10px 14px !important;\n    background: #FBF9F7 !important;\n    border: 1px solid rgba(0, 0, 0, 0.05) !important;\n    border-radius: 14px !important;\n    box-shadow: none !important;\n    font-weight: 600 !important;\n}\n\n\n\n/* =========================================================\n   WATER LEVEL GAUGE\n   ========================================================= */\n\n.water-level-gauge {\n    padding: 12px !important;\n    border-radius: 20px !important;\n\n    background: linear-gradient(\n        145deg,\n        #ffffff 0%,\n        #f5fbfe 100%\n    ) !important;\n\n    border: 1px solid rgba(59, 159, 224, 0.10) !important;\n\n    box-shadow:\n        0 5px 20px rgba(40, 35, 30, 0.04) !important;\n\n    transition:\n        transform 0.18s ease,\n        box-shadow 0.18s ease !important;\n}\n\n.water-level-gauge:hover {\n    transform: translateY(-1px);\n\n    box-shadow:\n        0 9px 26px rgba(40, 35, 30, 0.07) !important;\n}\n\n\n/* =========================================================\n   WATER LEVEL HISTORY\n   ========================================================= */\n\n.water-history-chart {\n    background: #ffffff !important;\n\n    border: 1px solid rgba(59, 159, 224, 0.08) !important;\n\n    border-radius: 20px !important;\n\n    box-shadow:\n        0 6px 24px rgba(40, 35, 30, 0.045) !important;\n\n    overflow: hidden !important;\n\n    transition:\n        transform 0.18s ease,\n        box-shadow 0.18s ease !important;\n}\n\n.water-history-chart:hover {\n    transform: translateY(-1px);\n\n    box-shadow:\n        0 10px 30px rgba(40, 35, 30, 0.065) !important;\n}\n\n\n/* =========================================================\n   EVENTS & ALERTS\n   ========================================================= */\n\n.event-history {\n    background: #ffffff !important;\n\n    border: 1px solid rgba(232, 93, 78, 0.08) !important;\n\n    border-radius: 22px !important;\n\n    box-shadow:\n        0 7px 26px rgba(40, 35, 30, 0.045) !important;\n\n    overflow: hidden !important;\n}\n\n/* Event list */\n\n.event-history hr {\n    border: 0 !important;\n    border-top: 1px solid rgba(43, 42, 40, 0.06) !important;\n}\n\n/* Scroll area */\n\n.event-history ::-webkit-scrollbar {\n    width: 7px;\n}\n\n.event-history ::-webkit-scrollbar-track {\n    background: transparent;\n}\n\n.event-history ::-webkit-scrollbar-thumb {\n    background: rgba(100, 95, 90, 0.18);\n    border-radius: 999px;\n}\n\n\n/* =========================================================\n   WATER LEVEL PREDICTION\n   ========================================================= */\n\n.water-prediction {\n    margin-top: 4px !important;\n    padding: 14px 18px !important;\n\n    background: #f4faff !important;\n\n    border: 1px solid rgba(59, 159, 224, 0.10) !important;\n\n    border-radius: 16px !important;\n\n    box-shadow:\n        0 4px 16px rgba(40, 35, 30, 0.035) !important;\n\n    color: #4f6f82 !important;\n\n    font-weight: 500 !important;\n}\n\n\n\n/* =========================================================\n   ACKNOWLEDGE BUTTON\n   ========================================================= */\n\n.acknowledge-button .v-btn {\n    width: 100% !important;\n    min-height: 48px !important;\n\n    border-radius: 16px !important;\n\n    background: #e85d4e !important;\n    color: #ffffff !important;\n\n    font-size: 14px !important;\n    font-weight: 700 !important;\n\n    text-transform: none !important;\n    letter-spacing: 0.1px !important;\n\n    box-shadow:\n        0 6px 18px rgba(232, 93, 78, 0.18) !important;\n\n    transition:\n        transform 0.18s ease,\n        box-shadow 0.18s ease,\n        opacity 0.18s ease !important;\n}\n\n.acknowledge-button .v-btn:hover {\n    transform: translateY(-1px) !important;\n\n    box-shadow:\n        0 9px 24px rgba(232, 93, 78, 0.23) !important;\n}\n\n.acknowledge-button .v-btn:active {\n    transform: translateY(0) scale(0.99) !important;\n}\n\n\n\n/* Prediction card */\n.water-prediction {\n  background: #F4F9FD !important;\n  border: 1px solid rgba(59, 159, 224, 0.18) !important;\n  border-radius: 18px !important;\n  padding: 12px 18px !important;\n  margin-top: 8px !important;\n  box-shadow: 0 3px 14px rgba(59, 159, 224, 0.06) !important;\n}\n\n.water-prediction .nrdb-ui-text-label {\n  color: #55758A !important;\n  font-weight: 500 !important;\n}\n\n.water-prediction .nrdb-ui-text-value {\n  color: #45697F !important;\n  font-weight: 600 !important;\n}\n\n\n/* ================================\n   WATER LEVEL SECTION\n   ================================ */\n\n.water-level-section {\n  border-radius: 24px !important;\n  box-shadow: 0 4px 20px rgba(20, 20, 20, 0.06) !important;\n}\n\n\n/* ================================\n   WATER LEVEL HISTORY\n   ================================ */\n\n.water-history-section {\n  border-radius: 24px !important;\n  box-shadow: 0 4px 20px rgba(20, 20, 20, 0.06) !important;\n}\n\n\n/* ================================\n   SYSTEM STATUS\n   ================================ */\n\n.system-status-section {\n  border-radius: 24px !important;\n  box-shadow: 0 4px 20px rgba(20, 20, 20, 0.06) !important;\n}\n\n\n/* =========================================================\n   WEATHER & CONDITIONS\n   ========================================================= */\n\n.weather-conditions-section {\n    border-radius: 24px !important;\n    background: linear-gradient(\n        145deg,\n        #ffffff 0%,\n        #f7fbfd 100%\n    ) !important;\n\n    border: 1px solid rgba(59, 159, 224, 0.10) !important;\n\n    box-shadow:\n        0 6px 24px rgba(40, 35, 30, 0.045) !important;\n\n    transition:\n        transform 0.18s ease,\n        box-shadow 0.18s ease !important;\n}\n\n.weather-conditions-section:hover {\n    transform: translateY(-1px);\n\n    box-shadow:\n        0 10px 30px rgba(40, 35, 30, 0.065) !important;\n}\n\n\n\n/* =========================================================\nTREND DISPLAY\n========================================================= */\n\n.trend-display {\nborder-radius: 20px !important;\noverflow: hidden !important;\n}\n\n.trend-display .trend-card {\nmin-height: 58px !important;\nbox-sizing: border-box !important;\n\ndisplay: flex !important;\nalign-items: center !important;\n\npadding: 12px 18px !important;\n\nborder-radius: 16px !important;\n\nbackground: #fcfbfa !important;\n\nbox-shadow:\n0 3px 14px rgba(40, 35, 30, 0.035) !important;\n\ntransition:\ntransform 0.18s ease,\nbox-shadow 0.18s ease !important;\n}\n\n.trend-display .trend-card:hover {\ntransform: translateY(-1px) !important;\n\nbox-shadow:\n0 7px 20px rgba(40, 35, 30, 0.07) !important;\n}\n\n.trend-display .trend-icon {\nwidth: 30px !important;\nmin-width: 30px !important;\n\ndisplay: flex !important;\nalign-items: center !important;\njustify-content: center !important;\n\nfont-size: 21px !important;\nfont-weight: 700 !important;\n}\n\n.trend-display .trend-label {\nfont-size: 12px !important;\nfont-weight: 500 !important;\ncolor: #706d69 !important;\n}\n\n.trend-display .trend-rate {\nmargin-top: 2px !important;\n\nfont-size: 16px !important;\nfont-weight: 700 !important;\n\ncolor: #292725 !important;\n}\n\n/* Stable */\n.trend-display .trend-card.stable {\nborder-left: 4px solid #2fae7b !important;\nbackground: #f8fffc !important;\n}\n\n.trend-display .trend-card.stable .trend-icon {\ncolor: #2fae7b !important;\n}\n\n/* Rising */\n.trend-display .trend-card.rising,\n.trend-display .trend-card.rising-fast {\nborder-left: 4px solid #f0a93b !important;\nbackground: #fffaf4 !important;\n}\n\n.trend-display .trend-card.rising .trend-icon,\n.trend-display .trend-card.rising-fast .trend-icon {\ncolor: #f0a93b !important;\n}\n\n/* Falling */\n.trend-display .trend-card.falling,\n.trend-display .trend-card.falling-fast {\nborder-left: 4px solid #3b9fe0 !important;\nbackground: #f4faff !important;\n}\n\n.trend-display .trend-card.falling .trend-icon,\n.trend-display .trend-card.falling-fast .trend-icon {\ncolor: #3b9fe0 !important;\n}\n\n\n\n\n\n\n",
+        "storeOutMessages": true,
+        "passthru": true,
+        "resendOnRefresh": true,
+        "templateScope": "page:style",
+        "className": "",
+        "x": 240,
+        "y": 1460,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "84a37b8712685445",
+        "type": "ui-button",
+        "z": "72c8828406909cd5",
+        "group": "ee8fd4b214124f49",
+        "name": "Alert Acknowledge",
+        "label": "Acknowledge",
+        "order": 7,
+        "width": 0,
+        "height": 0,
+        "emulateClick": false,
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "acknowledge-button",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "ack",
+        "payloadType": "str",
+        "topic": "topic",
+        "topicType": "msg",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "x": 190,
+        "y": 400,
+        "wires": [
+            [
+                "e8c081660d378122",
+                "c39912eb75e8ee74"
+            ]
+        ]
+    },
+    {
+        "id": "c39912eb75e8ee74",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Alert Acknowledge Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 510,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "e8c081660d378122",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Format ACK ",
+        "func": "flow.set(\"ackReceived\", true);\n\nmsg.payload = JSON.stringify({ ack: true, ts: Date.now() });\nmsg.topic = \"team10/flood/zone1/actuator/led\";\nmsg.payload=\"GREEN\";\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 420,
+        "wires": [
+            [
+                "503eaa216a6d34be"
+            ]
+        ]
+    },
+    {
+        "id": "503eaa216a6d34be",
+        "type": "mqtt out",
+        "z": "72c8828406909cd5",
+        "name": "ACK- Output ",
+        "topic": "team10/flood/zone1/actuator/led",
+        "qos": "0",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "0b25ba9ce3f7adc7",
+        "x": 750,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "929f6a8e6fc3efa3",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Trend Classifier",
+        "func": "// Trend Classifier\n// Dashboard display only.\n// Does not affect Risk Classifier or Prediction.\n\nconst rate = Number(msg.payload.rate);\n\nif (!Number.isFinite(rate)) {\n    return null;\n}\n\nconst abs = Math.abs(rate);\n\nlet direction;\nlet label;\n\nif (abs < 1) {\n    direction = \"stable\";\n    label = \"Stable\";\n}\nelse if (rate > 0 && abs < 3) {\n    direction = \"rising\";\n    label = \"Rising Slowly\";\n}\nelse if (rate > 0 && abs < 5) {\n    direction = \"rising\";\n    label = \"Rising\";\n}\nelse if (rate > 0) {\n    direction = \"rising-fast\";\n    label = \"Rising Rapidly\";\n}\nelse if (abs < 3) {\n    direction = \"falling\";\n    label = \"Falling Slowly\";\n}\nelse if (abs < 5) {\n    direction = \"falling\";\n    label = \"Falling\";\n}\nelse {\n    direction = \"falling-fast\";\n    label = \"Falling Rapidly\";\n}\n\nmsg.payload = {\n    rate: Number(rate.toFixed(2)),\n    direction: direction,\n    label: label\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1500,
+        "y": 620,
+        "wires": [
+            [
+                "37f40142196d7e0e",
+                "9a5e8a3684ef1798"
+            ]
+        ]
+    },
+    {
+        "id": "37f40142196d7e0e",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Trend Classifier Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1580,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "9a5e8a3684ef1798",
+        "type": "ui-template",
+        "z": "72c8828406909cd5",
+        "group": "067f67d85049edf2",
+        "page": "",
+        "ui": "",
+        "name": "Trend Display",
+        "order": 2,
+        "width": 0,
+        "height": 0,
+        "head": "",
+        "format": "<template>\n  <div class=\"trend-card\" :class=\"direction\">\n    <div class=\"trend-icon\">{{ arrow }}</div>\n\n    <div class=\"trend-info\">\n      <div class=\"trend-label\">{{ label }}</div>\n      <div class=\"trend-rate\">\n        {{ rate >= 0 ? '+' : '' }}{{ rate }} %/min\n      </div>\n    </div>\n  </div>\n</template>\n\n<script>\nexport default {\n  computed: {\n    direction() {\n      return this.msg?.payload?.direction || 'stable';\n    },\n\n    label() {\n      return this.msg?.payload?.label || 'Stable';\n    },\n\n    rate() {\n      return this.msg?.payload?.rate ?? 0;\n    },\n\n    arrow() {\n      const map = {\n        'rising-fast': '⬆⬆',\n        rising: '⬆',\n        'falling-fast': '⬇⬇',\n        falling: '⬇',\n        stable: '➡'\n      };\n\n      return map[this.direction] || '➡';\n    }\n  }\n}\n</script>\n\n<style scoped>\n.trend-card {\n  display: flex;\n  align-items: center;\n  gap: 14px;\n  padding: 14px 18px;\n  border-radius: 16px;\n  background: #FBF9F7;\n  border: 1px solid rgba(0,0,0,0.05);\n  font-family: 'Inter', 'Segoe UI', sans-serif;\n}\n\n.trend-icon {\n  font-size: 22px;\n}\n\n.trend-label {\n  font-size: 13px;\n  color: #6B6A68;\n}\n\n.trend-rate {\n  font-size: 18px;\n  font-weight: 700;\n  color: #2B2A28;\n}\n\n.trend-card.rising,\n.trend-card.rising-fast {\n  border-left: 4px solid #F0A93B;\n}\n\n.trend-card.falling,\n.trend-card.falling-fast {\n  border-left: 4px solid #3B9FE0;\n}\n\n.trend-card.stable {\n  border-left: 4px solid #2FAE7B;\n}\n</style>",
+        "storeOutMessages": true,
+        "passthru": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "trend-display",
+        "x": 1700,
+        "y": 520,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "9f62285ab26e98c5",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Risk Score Builder",
+        "func": "// Risk Score Builder\n// Derives a 0-100 display score + explanation from the existing\n// Water Risk Classifier output. Does NOT alter or duplicate the\n// classifier's decision — state is passed through untouched, and\n// the score is hard-clamped to that state's band so it can never\n// contradict it.\n\nconst level = Number(msg.payload.level);\nconst rate = Number(msg.payload.rate);\nconst state = msg.payload.state;\nconst weatherScore = Number(msg.payload.weather_score || 0);\nconst rainProb = Number(msg.payload.rain_probability_6h || 0);\nconst rainVol = Number(msg.payload.rain_volume_6h || 0);\n\nif (!Number.isFinite(level) || !state) return null;\n\n// ---- Reconstruct the same adaptive thresholds the classifier uses ----\n// (mirrors Water Risk Classifier's logic — for scoring interpretation only,\n// never used to decide state itself)\nlet levelWatch = 40, levelAlert = 60, levelCritical = 80;\nlet rateAlert = 3, rateCritical = 5;\n\nif (weatherScore >= 6) {\n    levelWatch = 30; levelAlert = 50; levelCritical = 70;\n    rateAlert = 2; rateCritical = 4;\n} else if (weatherScore >= 4) {\n    levelWatch = 35; levelAlert = 55; levelCritical = 75;\n    rateAlert = 2.5; rateCritical = 4.5;\n} else if (weatherScore >= 2) {\n    levelWatch = 38; levelAlert = 58; levelCritical = 78;\n    rateAlert = 2.8; rateCritical = 4.8;\n}\n\n// ---- Band definitions for the DISPLAY score (fixed, independent of state logic) ----\nconst bands = {\n    NORMAL: { min: 0, max: 39 },\n    WATCH: { min: 40, max: 59 },\n    ALERT: { min: 60, max: 79 },\n    CRITICAL: { min: 80, max: 100 }\n};\n\nconst band = bands[state] || bands.NORMAL;\n\n// ---- Estimate position within the band using level + rate pressure ----\nconst levelPressure = Math.min(1, level / (levelCritical || 100));\nconst ratePressure = Math.min(1, Math.max(0, rate) / (rateCritical || 5));\nconst combinedPressure = Math.max(levelPressure, ratePressure); // whichever is more severe\n\nlet rawScore = band.min + combinedPressure * (band.max - band.min);\n\n// Hard clamp — score can NEVER leave its state's band, no matter what\nrawScore = Math.max(band.min, Math.min(band.max, rawScore));\n\nconst score = Math.round(rawScore);\n\n// ---- Build human-readable factors dynamically from real values ----\nfunction levelDescriptor(l) {\n    if (l >= levelCritical) return \"critical\";\n    if (l >= levelAlert) return \"elevated\";\n    if (l >= levelWatch) return \"moderate\";\n    return \"normal\";\n}\n\nfunction rateDescriptor(r) {\n    const a = Math.abs(r);\n    if (a < 1) return \"stable\";\n    if (r > 0 && a >= rateCritical) return \"rapid\";\n    if (r > 0 && a >= rateAlert) return \"moderate\";\n    if (r > 0) return \"slow\";\n    if (a >= rateCritical) return \"falling rapidly\";\n    if (a >= rateAlert) return \"falling\";\n    return \"falling slowly\";\n}\n\nfunction rainImpactDescriptor(prob) {\n    if (prob >= 60) return \"high impact\";\n    if (prob >= 40) return \"moderate impact\";\n    if (prob >= 1) return \"low impact\";\n    return \"no impact\";\n}\n\nconst factors = [\n    `Water level: ${level.toFixed(0)}% (${levelDescriptor(level)})`,\n    `Rise rate: ${rate >= 0 ? '+' : ''}${rate.toFixed(1)}%/min (${rateDescriptor(rate)})`,\n    `Rain forecast: ${rainProb}% probability, ${rainVol}mm (${rainImpactDescriptor(rainProb)})`\n];\n\nconst recommendations = {\n    NORMAL: \"Continue monitoring.\",\n    WATCH: \"Monitor rainfall and water level closely.\",\n    ALERT: \"Inspect drain and prepare response.\",\n    CRITICAL: \"Immediate field inspection required.\"\n};\n\nmsg.payload = {\n    score: score,\n    state: state,\n    factors: factors,\n    recommendation: recommendations[state] || \"Continue monitoring.\",\n    level: level,\n    rate: rate\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2050,
+        "y": 620,
+        "wires": [
+            [
+                "37c9637f3449215a",
+                "715d3cfee508a90f"
+            ]
+        ]
+    },
+    {
+        "id": "37c9637f3449215a",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Risk Score Builder Debug ",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2110,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "715d3cfee508a90f",
+        "type": "ui-template",
+        "z": "72c8828406909cd5",
+        "group": "ee8fd4b214124f49",
+        "page": "",
+        "ui": "",
+        "name": "Risk Intelligence",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "head": "",
+        "format": "<template>\n  <div class=\"risk-card\" :class=\"stateClass\">\n\n    <div class=\"risk-top\">\n      <div>\n        <div class=\"risk-eyebrow\">FLOOD RISK SCORE</div>\n\n        <div class=\"risk-score\">\n          {{ score }}<span>/100</span>\n        </div>\n      </div>\n\n      <div class=\"risk-state\" :class=\"stateClass\">\n        {{ state }}\n      </div>\n    </div>\n\n    <div class=\"risk-divider\"></div>\n\n    <div class=\"risk-section-title\">\n      Why this Risk?\n    </div>\n\n    <div class=\"risk-factors\">\n      <div\n        v-for=\"(factor, index) in factors\"\n        :key=\"index\"\n        class=\"risk-factor\"\n      >\n        <span class=\"factor-dot\"></span>\n        <span>{{ factor }}</span>\n      </div>\n    </div>\n\n    <div class=\"risk-recommendation\">\n      <div class=\"recommendation-label\">\n        Recommended Action\n      </div>\n\n      <div class=\"recommendation-text\">\n        {{ recommendation }}\n      </div>\n    </div>\n\n  </div>\n</template>\n\n<script>\nexport default {\n  computed: {\n\n    score() {\n      return this.msg?.payload?.score ?? 0;\n    },\n\n    state() {\n      return this.msg?.payload?.state ?? \"NORMAL\";\n    },\n\n    factors() {\n      return this.msg?.payload?.factors ?? [];\n    },\n\n    recommendation() {\n      return this.msg?.payload?.recommendation ??\n        \"Continue monitoring.\";\n    },\n\n    stateClass() {\n      return \"state-\" +\n        (this.state || \"NORMAL\").toLowerCase();\n    }\n\n  }\n}\n</script>\n\n<style scoped>\n\n.risk-card {\n  width: 100%;\n  box-sizing: border-box;\n\n  padding: 18px 20px;\n\n  border-radius: 18px;\n\n  background: #FBF9F7;\n\n  border: 1px solid rgba(43, 42, 40, 0.06);\n\n  box-shadow:\n    0 5px 20px rgba(40, 35, 30, 0.045);\n\n  font-family:\n    'Inter',\n    'Segoe UI',\n    sans-serif;\n\n  color: #292725;\n\n  transition:\n    transform 0.18s ease,\n    box-shadow 0.18s ease;\n}\n\n.risk-card:hover {\n  transform: translateY(-1px);\n\n  box-shadow:\n    0 9px 26px rgba(40, 35, 30, 0.07);\n}\n\n\n/* --------------------------------\n   TOP\n-------------------------------- */\n\n.risk-top {\n  display: flex;\n\n  align-items: center;\n\n  justify-content: space-between;\n\n  gap: 16px;\n}\n\n.risk-eyebrow {\n  font-size: 10px;\n\n  letter-spacing: 0.7px;\n\n  font-weight: 650;\n\n  color: #77736e;\n\n  margin-bottom: 2px;\n}\n\n.risk-score {\n  font-size: 32px;\n\n  line-height: 1.05;\n\n  font-weight: 750;\n\n  letter-spacing: -0.8px;\n\n  color: #292725;\n}\n\n.risk-score span {\n  font-size: 14px;\n\n  font-weight: 500;\n\n  color: #77736e;\n\n  margin-left: 3px;\n\n  letter-spacing: 0;\n}\n\n\n/* --------------------------------\n   STATE BADGE\n-------------------------------- */\n\n.risk-state {\n  flex-shrink: 0;\n\n  padding: 7px 13px;\n\n  border-radius: 999px;\n\n  font-size: 11px;\n\n  font-weight: 750;\n\n  letter-spacing: 0.35px;\n}\n\n.state-normal .risk-state {\n  background: rgba(47, 174, 123, 0.13);\n\n  color: #2FAE7B;\n}\n\n.state-watch .risk-state {\n  background: rgba(59, 159, 224, 0.13);\n\n  color: #3B9FE0;\n}\n\n.state-alert .risk-state {\n  background: rgba(240, 169, 59, 0.15);\n\n  color: #B5761F;\n}\n\n.state-critical .risk-state {\n  background: rgba(232, 93, 78, 0.15);\n\n  color: #C43F2E;\n}\n\n\n/* --------------------------------\n   DIVIDER\n-------------------------------- */\n\n.risk-divider {\n  height: 1px;\n\n  margin: 13px 0;\n\n  background:\n    rgba(43, 42, 40, 0.06);\n}\n\n\n/* --------------------------------\n   WHY\n-------------------------------- */\n\n.risk-section-title {\n  font-size: 12px;\n\n  font-weight: 700;\n\n  color: #494744;\n\n  margin-bottom: 8px;\n}\n\n.risk-factors {\n  display: flex;\n\n  flex-direction: column;\n\n  gap: 6px;\n}\n\n.risk-factor {\n  display: flex;\n\n  align-items: flex-start;\n\n  gap: 8px;\n\n  font-size: 12px;\n\n  line-height: 1.4;\n\n  color: #5E5B57;\n}\n\n.factor-dot {\n  flex-shrink: 0;\n\n  width: 5px;\n  height: 5px;\n\n  margin-top: 5px;\n\n  border-radius: 50%;\n\n  background: #3B9FE0;\n}\n\n\n/* --------------------------------\n   RECOMMENDATION\n-------------------------------- */\n\n.risk-recommendation {\n  margin-top: 13px;\n\n  padding: 10px 12px;\n\n  border-radius: 12px;\n\n  background: rgba(59, 159, 224, 0.055);\n\n  border: 1px solid rgba(59, 159, 224, 0.09);\n\n  transition:\n    background 0.18s ease,\n    border-color 0.18s ease;\n}\n\n.recommendation-label {\n  font-size: 10px;\n\n  font-weight: 700;\n\n  letter-spacing: 0.35px;\n\n  text-transform: uppercase;\n\n  color: #55758A;\n\n  margin-bottom: 3px;\n}\n\n.recommendation-text {\n  font-size: 12px;\n\n  line-height: 1.4;\n\n  font-weight: 600;\n\n  color: #45697F;\n}\n\n\n/* --------------------------------\n   STATE-BASED RECOMMENDATION\n-------------------------------- */\n\n.risk-card.state-normal .risk-recommendation {\n  background: rgba(47, 174, 123, 0.055);\n  border-color: rgba(47, 174, 123, 0.10);\n}\n\n.risk-card.state-normal .recommendation-label,\n.risk-card.state-normal .recommendation-text {\n  color: #2F8F6B;\n}\n\n\n.risk-card.state-watch .risk-recommendation {\n  background: rgba(59, 159, 224, 0.055);\n  border-color: rgba(59, 159, 224, 0.10);\n}\n\n.risk-card.state-watch .recommendation-label,\n.risk-card.state-watch .recommendation-text {\n  color: #3B7FA8;\n}\n\n\n.risk-card.state-alert .risk-recommendation {\n  background: rgba(240, 169, 59, 0.065);\n  border-color: rgba(240, 169, 59, 0.12);\n}\n\n.risk-card.state-alert .recommendation-label,\n.risk-card.state-alert .recommendation-text {\n  color: #A66F20;\n}\n\n\n.risk-card.state-critical .risk-recommendation {\n  background: rgba(232, 93, 78, 0.065);\n  border-color: rgba(232, 93, 78, 0.12);\n}\n\n.risk-card.state-critical .recommendation-label,\n.risk-card.state-critical .recommendation-text {\n  color: #B94335;\n}\n\n\n\n\n/* --------------------------------\n   RESPONSIVE\n-------------------------------- */\n\n@media (max-width: 600px) {\n\n  .risk-card {\n    padding: 16px;\n  }\n\n  .risk-score {\n    font-size: 28px;\n  }\n\n  .risk-factor {\n    font-size: 11px;\n  }\n\n}\n\n</style>",
+        "storeOutMessages": true,
+        "passthru": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "risk-intelligence",
+        "x": 2340,
+        "y": 620,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "af4df86ac5555280",
+        "type": "ui-template",
+        "z": "72c8828406909cd5",
+        "group": "067f67d85049edf2",
+        "page": "",
+        "ui": "",
+        "name": "Overall Risk Indicator",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "head": "",
+        "format": "<template>\n  <div class=\"overall-risk-row\">\n    <span class=\"overall-risk-label\">Overall Flood Risk</span>\n    <span class=\"overall-risk-badge\" :class=\"stateClass\">{{ state }}</span>\n  </div>\n</template>\n\n<script>\nexport default {\n  computed: {\n    state() {\n      return this.msg?.payload || 'NORMAL';\n    },\n    stateClass() {\n      return 'state-' + (this.state || 'normal').toLowerCase();\n    }\n  }\n}\n</script>\n\n<style scoped>\n.overall-risk-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 4px 2px 10px 2px;\n  font-family: 'Inter', 'Segoe UI', sans-serif;\n}\n\n.overall-risk-label {\n  font-size: 11px;\n  letter-spacing: 0.4px;\n  color: #6B6A68;\n  text-transform: uppercase;\n}\n\n.overall-risk-badge {\n  font-size: 12px;\n  font-weight: 700;\n  padding: 4px 12px;\n  border-radius: 999px;\n  letter-spacing: 0.3px;\n}\n\n.state-normal {\n  background: rgba(47,174,123,0.14);\n  color: #2FAE7B;\n}\n\n.state-watch {\n  background: rgba(59,159,224,0.14);\n  color: #3B9FE0;\n}\n\n.state-alert {\n  background: rgba(240,169,59,0.16);\n  color: #B5761F;\n}\n\n.state-critical {\n  background: rgba(232,93,78,0.16);\n  color: #C43F2E;\n}\n</style>",
+        "storeOutMessages": true,
+        "passthru": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 2520,
+        "y": 820,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c317a4a025850390",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Risk State Cache",
+        "func": "// Risk State Cache — stores latest state for other branches to read\n\nconst state = msg.payload;\nconst prediction = flow.get('latestPrediction') || \"Water level is not currently rising\";\n\nflow.set('currentRiskState', state);\n\nmsg.payload = {\n    prediction: prediction,\n    state: state\n};\n\nreturn msg;\n\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2410,
+        "y": 920,
+        "wires": [
+            [
+                "b149457121cc47f8"
+            ]
+        ]
+    },
+    {
+        "id": "b149457121cc47f8",
+        "type": "ui-template",
+        "z": "72c8828406909cd5",
+        "group": "067f67d85049edf2",
+        "page": "",
+        "ui": "",
+        "name": "Time To Critical Display",
+        "order": 4,
+        "width": 0,
+        "height": 0,
+        "head": "",
+        "format": "<template>\n  <div class=\"prediction-card\" :class=\"stateClass\">\n    <div class=\"prediction-label\">\n      Prediction\n    </div>\n\n    <div class=\"prediction-content\">\n      <span class=\"prediction-state\">{{ state }}</span>\n      <span class=\"prediction-text\">{{ prediction }}</span>\n    </div>\n  </div>\n</template>\n\n<script>\nexport default {\n  computed: {\n    prediction() {\n      return this.msg?.payload?.prediction || 'No prediction available';\n    },\n\n    state() {\n      return this.msg?.payload?.state || 'NORMAL';\n    },\n\n    stateClass() {\n      return 'state-' + this.state.toLowerCase();\n    }\n  }\n}\n</script>\n\n<style scoped>\n.prediction-card {\n  width: 100%;\n  box-sizing: border-box;\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 18px;\n\n  padding: 12px 16px;\n\n  border-radius: 16px;\n  border: 1px solid rgba(59, 159, 224, 0.10);\n  background: #F4FAFF;\n\n  font-family: 'Inter', 'Segoe UI', sans-serif;\n}\n\n.prediction-label {\n  font-size: 13px;\n  color: #55758A;\n  font-weight: 500;\n  flex-shrink: 0;\n}\n\n.prediction-content {\n  display: flex;\n  align-items: center;\n  justify-content: flex-end;\n  gap: 10px;\n  text-align: right;\n}\n\n.prediction-state {\n  font-size: 11px;\n  font-weight: 700;\n  padding: 4px 9px;\n  border-radius: 999px;\n}\n\n.prediction-text {\n  font-size: 14px;\n  font-weight: 600;\n}\n\n.state-normal .prediction-state {\n  background: rgba(47,174,123,0.14);\n  color: #2FAE7B;\n}\n\n.state-watch .prediction-state {\n  background: rgba(59,159,224,0.14);\n  color: #3B9FE0;\n}\n\n.state-alert .prediction-state {\n  background: rgba(240,169,59,0.16);\n  color: #B5761F;\n}\n\n.state-critical .prediction-state {\n  background: rgba(232,93,78,0.16);\n  color: #C43F2E;\n}\n\n.state-normal .prediction-text {\n  color: #45697F;\n}\n\n.state-watch .prediction-text {\n  color: #3B82B8;\n}\n\n.state-alert .prediction-text {\n  color: #B5761F;\n}\n\n.state-critical .prediction-text {\n  color: #C43F2E;\n}\n\n@media (max-width: 600px) {\n  .prediction-card {\n    align-items: flex-start;\n    flex-direction: column;\n    gap: 8px;\n  }\n\n  .prediction-content {\n    width: 100%;\n    justify-content: flex-start;\n    text-align: left;\n    flex-wrap: wrap;\n  }\n}\n</style>",
+        "storeOutMessages": true,
+        "passthru": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 2690,
+        "y": 920,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "67be812785c21e3a",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Sensor Data Freshness Checker",
+        "func": "// Sensor Data Freshness Checker\n\nconst now = Date.now();\n\n// Periodic freshness check\nif (msg.topic === \"freshness_check\") {\n\n    const lastReading = flow.get(\"lastWaterLevelReading\");\n\n    if (!lastReading) {\n        msg.payload = {\n            status: \"STALE\",\n            age_seconds: null\n        };\n    } else {\n        const ageSeconds = (now - lastReading) / 1000;\n\n        msg.payload = {\n            status: ageSeconds > 15 ? \"STALE\" : \"FRESH\",\n            age_seconds: Number(ageSeconds.toFixed(1))\n        };\n    }\n\n    return msg;\n}\n\n// Normal water-level MQTT reading\nconst level = Number(msg.payload);\n\nif (!Number.isFinite(level)) {\n    return null;\n}\n\nflow.set(\"lastWaterLevelReading\", now);\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 490,
+        "y": 700,
+        "wires": [
+            [
+                "f086582231940474",
+                "e1a6898071ecfb30",
+                "aa95c06b5856d952"
+            ]
+        ]
+    },
+    {
+        "id": "031b0d8f1433a343",
+        "type": "inject",
+        "z": "72c8828406909cd5",
+        "name": "Sensor Freshness Timer",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "5",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "freshness_check",
+        "payload": "",
+        "payloadType": "date",
+        "x": 190,
+        "y": 760,
+        "wires": [
+            [
+                "67be812785c21e3a"
+            ]
+        ]
+    },
+    {
+        "id": "f086582231940474",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Sensor Freshness Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 490,
+        "y": 800,
+        "wires": []
+    },
+    {
+        "id": "6da903bd127a0583",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Actuator Node Status Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 340,
+        "y": 1220,
+        "wires": []
+    },
+    {
+        "id": "0d6352081c29d4e3",
+        "type": "mqtt in",
+        "z": "72c8828406909cd5",
+        "name": "Actuator Node Status Input",
+        "topic": "team10/flood/zone1/actuator/status",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "0b25ba9ce3f7adc7",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 310,
+        "y": 1300,
+        "wires": [
+            [
+                "6da903bd127a0583",
+                "e379ba26647ef5fd"
+            ]
+        ]
+    },
+    {
+        "id": "8849289b67129e98",
+        "type": "mqtt in",
+        "z": "72c8828406909cd5",
+        "name": "Sensor Node Status Input",
+        "topic": "team10/flood/zone1/node_status",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "0b25ba9ce3f7adc7",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 310,
+        "y": 1120,
+        "wires": [
+            [
+                "f5071fee47355a20",
+                "aa95c06b5856d952",
+                "e1a6898071ecfb30"
+            ]
+        ]
+    },
+    {
+        "id": "f5071fee47355a20",
+        "type": "debug",
+        "z": "72c8828406909cd5",
+        "d": true,
+        "name": "Sensor Node Status Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 340,
+        "y": 1040,
+        "wires": []
+    },
+    {
+        "id": "aa95c06b5856d952",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Sensor Node Status Display",
+        "func": "// Sensor Node Status Display\n\n// Current MQTT connection state\nlet connectionState = flow.get(\"sensorConnectionState\") || \"OFFLINE\";\n\n// Current sensor-data freshness\nlet dataState = flow.get(\"sensorDataFreshness\") || \"UNKNOWN\";\n\n// Handle sensor node connection status\nif (msg.topic === \"team10/flood/zone1/node_status\") {\n\n    connectionState =\n        (msg.payload === \"online\")\n            ? \"ONLINE\"\n            : \"OFFLINE\";\n\n    flow.set(\"sensorConnectionState\", connectionState);\n}\n\n// Handle sensor-data freshness\nelse if (\n    msg.topic === \"freshness_check\" &&\n    msg.payload &&\n    msg.payload.status\n) {\n\n    dataState = msg.payload.status;\n\n    flow.set(\"sensorDataFreshness\", dataState);\n}\n\n// Build dashboard status\nif (connectionState === \"OFFLINE\") {\n\n    msg.payload = \"OFFLINE • DATA UNAVAILABLE\";\n\n}\nelse if (dataState === \"STALE\") {\n\n    msg.payload = \"ONLINE • DATA STALE\";\n\n}\nelse if (dataState === \"FRESH\") {\n\n    msg.payload = \"ONLINE • DATA FRESH\";\n\n}\nelse {\n\n    msg.payload = \"ONLINE • CHECKING\";\n\n}\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 1120,
+        "wires": [
+            [
+                "98db4422f67497a9"
+            ]
+        ]
+    },
+    {
+        "id": "98db4422f67497a9",
+        "type": "ui-text",
+        "z": "72c8828406909cd5",
+        "group": "ee8fd4b214124f49",
+        "order": 5,
+        "width": 0,
+        "height": 0,
+        "name": "Sensor Node Status ",
+        "label": "Sensor Node",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "sensor-status",
+        "value": "payload",
+        "valueType": "msg",
+        "x": 940,
+        "y": 1120,
+        "wires": []
+    },
+    {
+        "id": "8cc45515427a429d",
+        "type": "ui-text",
+        "z": "72c8828406909cd5",
+        "group": "ee8fd4b214124f49",
+        "order": 6,
+        "width": 0,
+        "height": 0,
+        "name": "Actuator Node Status",
+        "label": "Actuator Node ",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "actuator-status",
+        "value": "payload",
+        "valueType": "msg",
+        "x": 960,
+        "y": 1300,
+        "wires": []
+    },
+    {
+        "id": "e379ba26647ef5fd",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Actuator Node Status Display",
+        "func": "msg.payload = (msg.payload === \"online\") ? \"ONLINE\" : \"OFFLINE\";\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 640,
+        "y": 1300,
+        "wires": [
+            [
+                "8cc45515427a429d"
+            ]
+        ]
+    },
+    {
+        "id": "855c31f314557815",
+        "type": "ui-text",
+        "z": "72c8828406909cd5",
+        "group": "ee8fd4b214124f49",
+        "order": 3,
+        "width": 0,
+        "height": 0,
+        "name": "System Health",
+        "label": "System Health",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "system-health",
+        "value": "payload",
+        "valueType": "msg",
+        "x": 1140,
+        "y": 1020,
+        "wires": []
+    },
+    {
+        "id": "e1a6898071ecfb30",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "System Health Calculator",
+        "func": "// System Health Calculator\n\nlet sensorConnection =\n    flow.get(\"sensorConnectionState\") || \"OFFLINE\";\n\nlet sensorData =\n    flow.get(\"sensorDataFreshness\") || \"UNKNOWN\";\n\nlet weatherStale =\n    flow.get(\"weatherIsStale\") || false;\n\n\n// =====================================================\n// SENSOR CONNECTION STATUS\n// =====================================================\n\nif (msg.topic === \"team10/flood/zone1/node_status\") {\n\n    sensorConnection =\n        (msg.payload === \"online\")\n            ? \"ONLINE\"\n            : \"OFFLINE\";\n\n    flow.set(\"sensorConnectionState\", sensorConnection);\n}\n\n\n// =====================================================\n// SENSOR DATA FRESHNESS\n// =====================================================\n\nelse if (\n    msg.topic === \"freshness_check\" &&\n    msg.payload &&\n    msg.payload.status\n) {\n\n    sensorData = msg.payload.status;\n\n    flow.set(\"sensorDataFreshness\", sensorData);\n}\n\n\n// =====================================================\n// WEATHER FRESHNESS\n// =====================================================\n\nelse if (\n    msg.payload &&\n    typeof msg.payload.weather_stale === \"boolean\"\n) {\n\n    weatherStale = msg.payload.weather_stale;\n\n    flow.set(\"weatherIsStale\", weatherStale);\n}\n\n\n// =====================================================\n// OVERALL SYSTEM HEALTH\n// =====================================================\n\nconst degraded =\n    sensorConnection === \"OFFLINE\" ||\n    sensorData === \"STALE\" ||\n    weatherStale === true;\n\n\nmsg.payload = degraded\n    ? \"SYSTEM DEGRADED\"\n    : \"SYSTEM HEALTHY\";\n\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 890,
+        "y": 1020,
+        "wires": [
+            [
+                "855c31f314557815"
+            ]
+        ]
+    },
+    {
+        "id": "4855838f9e4d425d",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Citizen Report Handler",
+        "func": "const form = msg.payload;\n\nif (!form || !form.location || !form.issue_type || !form.description) {\n    node.warn(\"Citizen Report Handler: incomplete form submission\");\n    return null;\n}\n\nconst report = {\n    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),\n    location: String(form.location).trim().slice(0, 120),\n    issue_type: String(form.issue_type).trim(),\n    description: String(form.description).trim().slice(0, 500),\n    status: \"Reported\",\n    time: new Date().toLocaleString()\n};\n\nconst PHOTO_WINDOW_MS = 10 * 60 * 1000;\nconst pendingPhoto = flow.get(\"pendingReportPhoto\");\nif (pendingPhoto && (Date.now() - pendingPhoto.ts) < PHOTO_WINDOW_MS) {\n    report.photo = pendingPhoto.dataUrl;\n}\nflow.set(\"pendingReportPhoto\", null);\n\nlet reports = flow.get(\"citizenReports\") || [];\nreports.unshift(report);\nif (reports.length > 50) reports = reports.slice(0, 50);\nflow.set(\"citizenReports\", reports);\n\nmsg.payload = reports;\nmsg.report = report;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1600,
+        "y": 1160,
+        "wires": [
+            [
+                "3850d6c7de7f741c",
+                "1c33169a856c2ce6",
+                "854b8b2a6adf3687"
+            ]
+        ]
+    },
+    {
+        "id": "3850d6c7de7f741c",
+        "type": "ui-template",
+        "z": "72c8828406909cd5",
+        "group": "0a0b26315cefb459",
+        "page": "",
+        "ui": "",
+        "name": "Recent Reports",
+        "order": 1,
+        "width": "6",
+        "height": "5",
+        "head": "",
+        "format": "<template>\n  <div class=\"rr-card\">\n    <div class=\"rr-header\">\n      <div class=\"rr-title\">Recently Reported Issues</div>\n      <div class=\"rr-count\">{{ reports.length }} report{{ reports.length === 1 ? '' : 's' }}</div>\n    </div>\n\n    <div class=\"rr-list\">\n      <div\n        v-for=\"(r, idx) in reports\"\n        :key=\"r.id || idx\"\n        class=\"rr-row\"\n      >\n        <div class=\"rr-row-top\">\n          <span class=\"rr-type\" :class=\"typeClass(r.issue_type)\">{{ r.issue_type }}</span>\n          <span class=\"rr-time\">{{ r.time }}</span>\n        </div>\n        <div class=\"rr-location\">&#128205; {{ r.location }}</div>\n        <img v-if=\"r.photo\" :src=\"r.photo\" class=\"rr-photo\" alt=\"Reported issue photo\" />\n        <div class=\"rr-desc\">{{ r.description }}</div>\n      </div>\n\n      <div v-if=\"!reports.length\" class=\"rr-empty\">\n        No issues reported yet. Be the first to report one!\n      </div>\n    </div>\n  </div>\n</template>\n\n<script>\nexport default {\n  computed: {\n    reports() {\n      return Array.isArray(this.msg?.payload) ? this.msg.payload : [];\n    }\n  },\n  methods: {\n    typeClass(t) {\n      const map = {\n        Blockage: 'rr-blockage',\n        Overflow: 'rr-overflow',\n        'Damaged Cover': 'rr-damaged',\n        Garbage: 'rr-garbage'\n      };\n      return map[t] || 'rr-default';\n    }\n  }\n}\n</script>\n\n<style scoped>\n.rr-card {\n  width: 100%;\n  box-sizing: border-box;\n  font-family: 'Inter', 'Segoe UI', sans-serif;\n  color: #292725;\n}\n\n.rr-header {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 2px 2px 12px 2px;\n}\n\n.rr-title {\n  font-size: 16px;\n  font-weight: 700;\n}\n\n.rr-count {\n  font-size: 12px;\n  color: #77736e;\n}\n\n.rr-list {\n  max-height: 340px;\n  overflow-y: auto;\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  padding-right: 4px;\n}\n\n.rr-row {\n  padding: 12px 14px;\n  background: #FBF9F7;\n  border: 1px solid rgba(0, 0, 0, 0.05);\n  border-radius: 14px;\n}\n\n.rr-row-top {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  margin-bottom: 6px;\n}\n\n.rr-type {\n  font-size: 11px;\n  font-weight: 700;\n  padding: 3px 10px;\n  border-radius: 999px;\n  letter-spacing: 0.2px;\n  white-space: nowrap;\n}\n\n.rr-blockage { background: rgba(232, 93, 78, 0.14); color: #C43F2E; }\n.rr-overflow { background: rgba(59, 159, 224, 0.14); color: #3B9FE0; }\n.rr-damaged  { background: rgba(240, 169, 59, 0.16); color: #B5761F; }\n.rr-garbage  { background: rgba(47, 174, 123, 0.14); color: #2FAE7B; }\n.rr-default  { background: rgba(0, 0, 0, 0.06); color: #6B6A68; }\n\n.rr-time {\n  font-size: 11px;\n  color: #9a9691;\n  white-space: nowrap;\n}\n\n.rr-location {\n  font-size: 13px;\n  font-weight: 600;\n  margin-bottom: 3px;\n}\n\n.rr-desc {\n  font-size: 12px;\n  color: #6B6A68;\n  line-height: 1.4;\n}\n\n.rr-empty {\n  text-align: center;\n  color: #6B6A68;\n  padding: 24px 0;\n  font-size: 13px;\n}\n\n.rr-list::-webkit-scrollbar {\n  width: 6px;\n}\n\n.rr-list::-webkit-scrollbar-thumb {\n  background: rgba(0, 0, 0, 0.12);\n  border-radius: 10px;\n}\n\n.rr-photo {\n  width: 100%;\n  max-height: 160px;\n  object-fit: cover;\n  border-radius: 10px;\n  margin: 6px 0;\n  display: block;\n}\n\n@media (max-width: 600px) {\n  .rr-title { font-size: 15px; }\n}\n</style>",
+        "storeOutMessages": true,
+        "passthru": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 2000,
+        "y": 1100,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "1c33169a856c2ce6",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Report Confirmation Message",
+        "func": "// Report Confirmation Message\nconst report = msg.report;\n\nmsg.payload = report\n    ? \"Thanks! Your report (\" + report.issue_type + \" at \" + report.location + \") has been received.\"\n    : \"Thanks! Your report has been received.\";\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1970,
+        "y": 1160,
+        "wires": [
+            [
+                "be655f65f6ce747d"
+            ]
+        ]
+    },
+    {
+        "id": "be655f65f6ce747d",
+        "type": "ui-notification",
+        "z": "72c8828406909cd5",
+        "ui": "a0a17f36f9e31d8b",
+        "position": "bottom right",
+        "colorDefault": false,
+        "color": "#2fae7b",
+        "displayTime": "4",
+        "showCountdown": true,
+        "outputs": 1,
+        "allowDismiss": true,
+        "dismissText": "Close",
+        "allowConfirm": false,
+        "confirmText": "Confirm",
+        "raw": false,
+        "className": "",
+        "name": "Report Submitted Notification",
+        "x": 2280,
+        "y": 1160,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "854b8b2a6adf3687",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Citizen Report Email Formatter",
+        "func": "const report = msg.report;\n\nif (!report) {\n    return null;\n}\n\nconst email = {\n    subject: \"New Drain Issue Reported: \" + report.issue_type + \" (\" + report.location + \")\"\n};\n\nif (report.photo) {\n    email.attachments = [\n        { filename: \"report-photo.jpg\", path: report.photo }\n    ];\n}\n\nmsg.email = email;\n\nmsg.payload =\n    \"A citizen has reported a drain issue.\\n\\n\" +\n    \"Location: \" + report.location + \"\\n\" +\n    \"Issue type: \" + report.issue_type + \"\\n\" +\n    \"Description: \" + report.description + \"\\n\" +\n    \"Reported at: \" + report.time +\n    (report.photo ? \"\\n\\n(Photo attached)\" : \"\");\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1970,
+        "y": 1220,
+        "wires": [
+            [
+                "57ce61ad2ca72a69"
+            ]
+        ]
+    },
+    {
+        "id": "57ce61ad2ca72a69",
+        "type": "email-send",
+        "z": "72c8828406909cd5",
+        "transport": "d4378c6f53dd793c",
+        "from": "vivekpatnem24csds@rnsit.ac.in",
+        "to": "christosaviogeorge24csds@rnsit.ac.in, vivekpatnem@gmail.com",
+        "cc": "",
+        "bcc": "",
+        "subject": "New Citizen Drain Report",
+        "contentType": "text",
+        "priority": "normal",
+        "name": "Citizen Report Email",
+        "x": 2260,
+        "y": 1220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "8c3228da6cce6e70",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Citizen Status Formatter",
+        "func": "// Citizen Status Formatter\n// Builds the plain-language status card for the public Citizen Dashboard.\n// Fires on two different triggers, both wired in manually:\n//   1) Risk State Output  -> msg.payload is the state string (\"NORMAL\"/\"WATCH\"/\"ALERT\"/\"CRITICAL\")\n//   2) Weather Decision Input -> msg.payload is the weather decision object\n// Either trigger refreshes the card using the latest known values of both.\n\nlet state;\n\nif (typeof msg.payload === \"string\") {\n    state = msg.payload;\n} else {\n    state = flow.get(\"currentRiskState\") || \"NORMAL\";\n}\n\nconst weather = flow.get(\"weatherForecast\") || {};\n\nconst messages = {\n    NORMAL:   { headline: \"All Clear\",       detail: \"No flooding risk right now. Drains are operating normally.\",                              color: \"green\"  },\n    WATCH:    { headline: \"Being Monitored\", detail: \"Weather is being watched closely. No action needed yet.\",                                  color: \"blue\"   },\n    ALERT:    { headline: \"Elevated Risk\",   detail: \"Drains may overflow soon. Avoid parking or lingering near drains in this area.\",            color: \"orange\" },\n    CRITICAL: { headline: \"High Flood Risk\", detail: \"Flooding is likely or already happening. Avoid this area and follow local advisories.\",     color: \"red\"    }\n};\n\nconst info = messages[state] || messages.NORMAL;\n\nmsg.payload = {\n    state: state,\n    headline: info.headline,\n    detail: info.detail,\n    color: info.color,\n    rain_expected: !!weather.rain_expected_6h,\n    rain_probability: weather.rain_probability_6h ?? 0,\n    updated: new Date().toLocaleTimeString()\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1600,
+        "y": 1340,
+        "wires": [
+            [
+                "d3d4fb14a1c6b8eb"
+            ]
+        ]
+    },
+    {
+        "id": "d3d4fb14a1c6b8eb",
+        "type": "ui-template",
+        "z": "72c8828406909cd5",
+        "group": "618c18f15ec4a447",
+        "page": "",
+        "ui": "",
+        "name": "Citizen Status Card",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "head": "",
+        "format": "<template>\n  <div class=\"cs-card\" :class=\"colorClass\">\n    <div class=\"cs-top\">\n      <div class=\"cs-eyebrow\">ZONE 1 STATUS</div>\n      <div class=\"cs-badge\" :class=\"colorClass\">{{ state }}</div>\n    </div>\n\n    <div class=\"cs-headline\">{{ headline }}</div>\n    <div class=\"cs-detail\">{{ detail }}</div>\n\n    <div class=\"cs-weather\" v-if=\"rainExpected\">\n      &#127783;&#65039; Rain expected in the next few hours ({{ rainProbability }}% chance) &mdash; drains may fill faster than usual.\n    </div>\n\n    <div class=\"cs-updated\">Last updated {{ updated }}</div>\n  </div>\n</template>\n\n<script>\nexport default {\n  computed: {\n    headline() { return this.msg?.payload?.headline || 'All Clear'; },\n    detail() { return this.msg?.payload?.detail || 'No flooding risk right now.'; },\n    state() { return this.msg?.payload?.state || 'NORMAL'; },\n    colorClass() { return 'cs-' + (this.msg?.payload?.color || 'green'); },\n    rainExpected() { return !!this.msg?.payload?.rain_expected; },\n    rainProbability() { return this.msg?.payload?.rain_probability ?? 0; },\n    updated() { return this.msg?.payload?.updated || ''; }\n  }\n}\n</script>\n\n<style scoped>\n.cs-card {\n  width: 100%;\n  box-sizing: border-box;\n  padding: 22px 24px;\n  border-radius: 22px;\n  font-family: 'Inter', 'Segoe UI', sans-serif;\n  color: #292725;\n  border: 1px solid rgba(43, 42, 40, 0.06);\n  box-shadow: 0 6px 24px rgba(40, 35, 30, 0.05);\n}\n\n.cs-top {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n}\n\n.cs-eyebrow {\n  font-size: 11px;\n  letter-spacing: 0.6px;\n  font-weight: 650;\n  color: #77736e;\n}\n\n.cs-badge {\n  font-size: 11px;\n  font-weight: 750;\n  padding: 5px 12px;\n  border-radius: 999px;\n  letter-spacing: 0.3px;\n}\n\n.cs-headline {\n  margin-top: 10px;\n  font-size: 26px;\n  font-weight: 750;\n  letter-spacing: -0.3px;\n}\n\n.cs-detail {\n  margin-top: 6px;\n  font-size: 14px;\n  color: #55524f;\n  line-height: 1.4;\n}\n\n.cs-weather {\n  margin-top: 14px;\n  padding: 10px 14px;\n  border-radius: 12px;\n  font-size: 13px;\n  font-weight: 500;\n  background: rgba(59, 159, 224, 0.08);\n  color: #3B7FA8;\n}\n\n.cs-updated {\n  margin-top: 12px;\n  font-size: 11px;\n  color: #9a9691;\n}\n\n.cs-green .cs-badge  { background: rgba(47, 174, 123, 0.14); color: #2FAE7B; }\n.cs-blue  .cs-badge  { background: rgba(59, 159, 224, 0.14); color: #3B9FE0; }\n.cs-orange .cs-badge { background: rgba(240, 169, 59, 0.16); color: #B5761F; }\n.cs-red   .cs-badge  { background: rgba(232, 93, 78, 0.16);  color: #C43F2E; }\n\n.cs-card.cs-green  { background: #F7FDFB; border-color: rgba(47, 174, 123, 0.14); }\n.cs-card.cs-blue   { background: #F4FAFF; border-color: rgba(59, 159, 224, 0.14); }\n.cs-card.cs-orange { background: #FFFAF4; border-color: rgba(240, 169, 59, 0.16); }\n.cs-card.cs-red    { background: #FFF6F5; border-color: rgba(232, 93, 78, 0.18); }\n\n@media (max-width: 600px) {\n  .cs-card { padding: 18px 18px; }\n  .cs-headline { font-size: 22px; }\n}\n</style>",
+        "storeOutMessages": true,
+        "passthru": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1900,
+        "y": 1340,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "eb19f6519b4e702e",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Store Pending Photo",
+        "func": "// Store Pending Photo\n// Holds an uploaded photo in flow context until the report form is\n// submitted. The File Upload widget and the report form are two\n// separate widgets, so their messages arrive separately - this\n// bridges them together.\n\nconst MAX_BYTES = 5 * 1024 * 1024; // 5MB - the dashboard's default upload limit\n\nif (!msg.payload || !msg.file) {\n    return null;\n}\n\nif (msg.file.size > MAX_BYTES) {\n    node.warn(\"Citizen photo upload rejected: too large (\" + msg.file.size + \" bytes)\");\n    msg.payload = \"That photo is too large. Please choose one under 5MB.\";\n    return msg;\n}\n\nconst dataUrl = \"data:\" + msg.file.type + \";base64,\" + msg.payload.toString(\"base64\");\n\nflow.set(\"pendingReportPhoto\", {\n    dataUrl: dataUrl,\n    name: msg.file.name,\n    ts: Date.now()\n});\n\nmsg.payload = \"Photo attached. Now fill out and submit the form below.\";\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2160,
+        "y": 1340,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c488341a8ab76add",
+        "type": "ui-file-input",
+        "z": "72c8828406909cd5",
+        "group": "a028831610cda710",
+        "name": "Photo of the issue (optional)",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "topic": "topic",
+        "topicType": "msg",
+        "label": "File Input",
+        "icon": "paperclip",
+        "allowMultiple": false,
+        "accept": "image/*",
+        "className": "",
+        "x": 1880,
+        "y": 1420,
+        "wires": [
+            [
+                "eb19f6519b4e702e"
+            ]
+        ]
+    },
+    {
+        "id": "97a5f4a6ead5782a",
+        "type": "mqtt in",
+        "z": "72c8828406909cd5",
+        "name": "Float Switch MQTT Input",
+        "topic": "team10/flood/zone1/float",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "0b25ba9ce3f7adc7",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 1370,
+        "y": 340,
+        "wires": [
+            [
+                "0b6da7a097324018"
+            ]
+        ]
+    },
+    {
+        "id": "0b6da7a097324018",
+        "type": "function",
+        "z": "72c8828406909cd5",
+        "name": "Float Switch Handler",
+        "func": "// Float Switch Handler\n// A physical float switch is a hard \"water is here\" signal, so when\n// it trips it locks the whole system at CRITICAL until it clears -\n// see the matching override block added to Water Risk Classifier.\n//\n// If your ESP32 uses a different topic, edit the MQTT input node above.\n\nconst raw = msg.payload;\n\n// Accepts common formats: 1/0, true/false, \"1\"/\"0\", \"WET\"/\"DRY\", \"HIGH\"/\"LOW\"\nconst tripped =\n    raw === true ||\n    raw === 1 ||\n    raw === \"1\" ||\n    String(raw).toLowerCase() === \"true\" ||\n    String(raw).toLowerCase() === \"wet\" ||\n    String(raw).toLowerCase() === \"high\";\n\nflow.set(\"floatSwitchTripped\", tripped);\n\nif (!tripped) {\n    // Just clears the lock - the next normal sensor reading\n    // re-evaluates the real state on its own.\n    return null;\n}\n\nnode.warn(\"Float switch tripped - forcing CRITICAL\");\n\nmsg.payload = { state: \"CRITICAL\" };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1660,
+        "y": 340,
+        "wires": [
+            [
+                "ac2ec16e39e2dc1c"
+            ]
+        ]
+    },
+    {
+        "id": "0b25ba9ce3f7adc7",
+        "type": "mqtt-broker",
+        "name": "Viv ( MY-EMQX Broker )",
+        "broker": "192.168.137.94",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "ee8fd4b214124f49",
+        "type": "ui-group",
+        "name": "System Status",
+        "page": "d574872c27a167e7",
+        "width": 6,
+        "height": "3",
+        "order": 3,
+        "showTitle": false,
+        "className": "system-status-section",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "a0a17f36f9e31d8b",
+        "type": "ui-base",
+        "name": "My Dashboard",
+        "path": "/dashboard",
+        "appIcon": "",
+        "includeClientData": true,
+        "acceptsClientConfig": [
+            "ui-notification",
+            "ui-control"
+        ],
+        "showPathInSidebar": false,
+        "headerContent": "page",
+        "navigationStyle": "default",
+        "titleBarStyle": "default",
+        "showReconnectNotification": true,
+        "notificationDisplayTime": 1,
+        "showDisconnectNotification": true,
+        "allowInstall": false
+    },
+    {
+        "id": "067f67d85049edf2",
+        "type": "ui-group",
+        "name": "Water Level",
+        "page": "d574872c27a167e7",
+        "width": 6,
+        "height": "3",
+        "order": 4,
+        "showTitle": false,
+        "className": "water-level-section",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "d4378c6f53dd793c",
+        "type": "email-transport",
+        "name": "Gmail",
+        "host": "smtp.gmail.com",
+        "port": "465",
+        "secure": true,
+        "authType": "login",
+        "proxy": ""
+    },
+    {
+        "id": "a028831610cda710",
+        "type": "ui-group",
+        "name": "Citizen Reports",
+        "page": "277e3dbd77f5bade",
+        "width": 6,
+        "height": 1,
+        "order": 1,
+        "showTitle": true,
+        "className": "",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "3eb8addf49382ca2",
+        "type": "ui-group",
+        "name": "Water Level History",
+        "page": "d574872c27a167e7",
+        "width": 12,
+        "height": "4",
+        "order": 5,
+        "showTitle": false,
+        "className": "water-history-section",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "653574f30dcf7cc3",
+        "type": "ui-group",
+        "name": "Events & Alerts",
+        "page": "d574872c27a167e7",
+        "width": "12",
+        "height": "4",
+        "order": 6,
+        "showTitle": false,
+        "className": "",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "39a23e35efd659ec",
+        "type": "ui-group",
+        "name": "Weather & Conditions",
+        "page": "d574872c27a167e7",
+        "width": 12,
+        "height": "2",
+        "order": 2,
+        "showTitle": false,
+        "className": "weather-conditions-section",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "d574872c27a167e7",
+        "type": "ui-page",
+        "name": "Drain Monitor ",
+        "ui": "a0a17f36f9e31d8b",
+        "path": "/page3",
+        "icon": "home",
+        "layout": "grid",
+        "theme": "1cc6f1958f89cc4a",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 1,
+        "className": "",
+        "visible": false,
+        "disabled": "false"
+    },
+    {
+        "id": "0a0b26315cefb459",
+        "type": "ui-group",
+        "name": "Recent Reports",
+        "page": "",
+        "width": 6,
+        "height": 4,
+        "order": 3,
+        "showTitle": false,
+        "className": "citizen-reports-list",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "618c18f15ec4a447",
+        "type": "ui-group",
+        "name": "Current Conditions",
+        "page": "277e3dbd77f5bade",
+        "width": 12,
+        "height": 3,
+        "order": 2,
+        "showTitle": false,
+        "className": "citizen-status-section",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "277e3dbd77f5bade",
+        "type": "ui-page",
+        "name": "Citizen Dashboard",
+        "ui": "a0a17f36f9e31d8b",
+        "path": "/page4",
+        "icon": "home",
+        "layout": "grid",
+        "theme": "1cc6f1958f89cc4a",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 2,
+        "className": "",
+        "visible": "true",
+        "disabled": "false"
+    },
+    {
+        "id": "1cc6f1958f89cc4a",
+        "type": "ui-theme",
+        "name": "Default Theme",
+        "colors": {
+            "surface": "#fcfcfd",
+            "primary": "#0d74ce",
+            "bgPage": "#f9f9fb",
+            "groupBg": "#ffffff",
+            "groupOutline": "#d9d9e0"
+        },
+        "sizes": {
+            "density": "default",
+            "pagePadding": "12px",
+            "groupGap": "12px",
+            "groupBorderRadius": "4px",
+            "widgetGap": "12px"
+        }
+    },
+    {
+        "id": "52f61b1d039ce251",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-node-openweathermap": "1.0.1",
+            "@flowfuse/node-red-dashboard-2-ui-led": "1.1.0",
+            "@flowfuse/node-red-dashboard": "1.31.0",
+            "node-red-contrib-email": "0.3.1"
+        }
+    }
+]
