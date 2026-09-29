@@ -150,7 +150,7 @@ Note: API keys and credentials are not included in this repository.
 
 ---
 
-## Team (Team 10)
+## Team : 
 
 - [Vivek Patne](https://www.linkedin.com/in/vivekpatnem/)
 - [Christo Savio George](https://www.linkedin.com/in/christosaviogeorge/)
