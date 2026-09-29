@@ -157,7 +157,7 @@ Note: API keys and credentials are not included in this repository.
 - [Aditya Mathad](https://www.linkedin.com/in/aditya-mathad-796bb2378/)
 - [Sandeep Patil](https://www.linkedin.com/in/sandeep-patil-a8bb493b2/)
 
-Mentor: Tushar Das, Samsung Innovation Campus IoT, RNSIT
+Mentor: [Tushar Das](https://www.linkedin.com/in/tusha-iottech/)
 
 ---
 
